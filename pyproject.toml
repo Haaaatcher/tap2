@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tapp"
+version = "0.0.1"
+authors = [
+    {name = "Hang Luo", email = "haaaatcher@gmail.com"},
+    {name = "Shan Li"},
+    {name = "Qiyang Lv"},
+    {name = "Luyue Qiu"}
+]
+description = "Use TAPP for property prediction of titanium alloy."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.8.0",
+    "gradio>=5.42.0",
+    "art>=6.5",
+    "tqdm>=4.67.1",
+    "openpyxl>=3.1.5"
+]
+
+[project.scripts]
+tapp = "tapp.cli:run_gradio"
+tap2 = "tapp.cli:run_gradio"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+tapp = [
+    "data/*"
+]
+
+[tool.setuptools.packages]
+find = {}
