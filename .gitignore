@@ -1,5 +1,8 @@
 /tapp.egg-info/
-/tapp/data/
+/tapp/normalization/
+/tapp/resource/
+/tapp/weight/
+/tapp/dataset/
 /dist/
 /assets/
 /.idea/
