@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tapp"
-version = "0.0.3"
+version = "0.0.4"
 authors = [
     {name = "Hang Luo", email = "haaaatcher@gmail.com"},
     {name = "Shan Li"},
@@ -19,7 +19,8 @@ dependencies = [
     "art>=6.5",
     "tqdm>=4.67.1",
     "openpyxl>=3.1.5",
-    "numpy>=2.2.6"
+    "numpy>=2.2.6",
+    "pydantic>=2.11.7"
 ]
 
 [project.scripts]
@@ -32,7 +33,6 @@ include-package-data = true
 [tool.setuptools.package-data]
 tapp = [
     "weight/*",
-    "normalization/*",
     "resource/*",
     "dataset/*"
 ]
