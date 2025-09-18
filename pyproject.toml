@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tapp"
-version = "0.0.4"
+version = "0.0.5"
 authors = [
     {name = "Hang Luo", email = "haaaatcher@gmail.com"},
     {name = "Shan Li"},

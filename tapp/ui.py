@@ -193,7 +193,7 @@ def run_gradio():
         mech_run_btn.click(
             fn=_beta_get_ti_alloy_mech_prop,
             inputs=[mech_Ti, mech_H, mech_B, mech_C, mech_N, mech_O, mech_Al, mech_Si, mech_Cr, mech_Mn, mech_Fe,
-                    mech_Co, mech_Ni, mech_Cu, mech_Zr, mech_Nb, mech_Mo, mech_Ta, mech_V, mech_Sn, mech_Bi, phys_proc],
+                    mech_Co, mech_Ni, mech_Cu, mech_Zr, mech_Nb, mech_Mo, mech_Ta, mech_V, mech_Sn, mech_Bi, mech_proc],
             outputs=[mech_ys, mech_ts, mech_h, mech_hp]
         )
         for mech_elem in [mech_H, mech_B, mech_C, mech_N, mech_O, mech_Al, mech_Si, mech_Cr, mech_Mn, mech_Fe, mech_Co,
