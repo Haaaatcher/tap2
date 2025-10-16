@@ -1,6 +1,7 @@
 /tapp.egg-info/
 /tapp/resource/
 /tapp/weight/
-/tapp/dataset/
 /dist/
 /.idea/
+/.gradio/
+/test/
