@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from tapp import TAPPModelInfer, TAPPInput
 from typing import List
+from fastapi.middleware.cors import CORSMiddleware
 
 
 class TAPPOutput(BaseModel):
@@ -12,6 +13,15 @@ class TAPPOutput(BaseModel):
 
 
 app = FastAPI(title="TAPP", description="Use TAPP for property prediction of titanium alloy.", version="0.0.6")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 tapp_infer = TAPPModelInfer()

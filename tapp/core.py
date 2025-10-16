@@ -44,7 +44,7 @@ class TAPPInput(BaseModel):
     V: float = Field(..., description="钒元素的质量分数", examples=[4.0], ge=0, le=100)
     Sn: float = Field(..., description="锡元素的质量分数", examples=[0.0], ge=0, le=100)
     HTT: float = Field(..., description="热处理温度（摄氏度）", examples=[600.0], gt=-273.15)
-    GS: Optional[float] = Field(default=10.0, description="晶粒尺寸（微米）", examples=[10.0], gt=0.0)
+    GS: Optional[float] = Field(default=10.0, description="晶粒尺寸（微米），对于力学性能是必须的", examples=[10.0], gt=0.0)
 
     model_config = {"frozen": True}
 
