@@ -105,4 +105,4 @@ async def batch_predict_ta(input_data: List[TAPPInput]) -> List[TAPPOutput]:
 @click.option("--host", default="127.0.0.1")
 @click.option("--port", default=8000)
 def run_fast_api(host, port):
-    uvicorn.run("tapp.api:app", host=host, port=port, reload=True)
+    uvicorn.run("tapp.api:app", host=host, port=port, reload=False)
