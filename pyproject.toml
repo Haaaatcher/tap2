@@ -3,16 +3,26 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tapp"
-version = "0.0.6"
+name = "tap2"
+version = "0.0.7"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+readme = "README.md"
 authors = [
     {name = "Hang Luo", email = "haaaatcher@gmail.com"},
     {name = "Shan Li"},
-    {name = "Qiyang Lv"},
-    {name = "Luyue Qiu"}
+    {name = "Qi-yang Lv"},
+    {name = "Lu-yue Qiu"},
+    {name = "Rui-hao He"}
 ]
-description = "Use TAPP for property prediction of titanium alloy."
+urls = {Homepage = "https://github.com/Haaaatcher"}
+description = "Use TAP2 for property prediction of titanium alloy."
 requires-python = ">=3.10"
+keywords = ["titanium alloy", "property prediction"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "torch>=2.8.0",
     "gradio>=5.49.1",
@@ -23,19 +33,30 @@ dependencies = [
     "tqdm>=4.67.1",
     "openpyxl>=3.1.5",
     "numpy>=2.2.6",
-    "pydantic>=2.11.7"
+    "pydantic>=2.11.7",
+    "matplotlib>=3.10.7",
+    "sparsemax>=0.1.9",
+    "loguru>=0.7.3",
+    "charset_normalizer>=3.4.3",
+    "joblib>=1.5.2",
+    "scipy>=1.15.3",
+    "catboost>=1.2.8",
+    "scikit-learn>=1.7.2"
 ]
 
 [project.scripts]
-tapu = "tapp.ui:run_gradio"
-taps = "tapp.api:run_fast_api"
+tapu = "tap2.ui:run_gradio"
+taps = "tap2.api:run_fast_api"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.package-data]
-tapp = [
+tap2 = [
     "weight/*",
+    "resource/*"
+]
+thermal_deformation = [
     "resource/*"
 ]
 
