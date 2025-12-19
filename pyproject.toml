@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tap2"
-version = "0.0.7"
+version = "0.0.8"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -13,7 +13,8 @@ authors = [
     {name = "Shan Li"},
     {name = "Qi-yang Lv"},
     {name = "Lu-yue Qiu"},
-    {name = "Rui-hao He"}
+    {name = "Rui-hao He"},
+    {name = "Bo-han Zhang"}
 ]
 urls = {Homepage = "https://github.com/Haaaatcher"}
 description = "Use TAP2 for property prediction of titanium alloy."
@@ -25,23 +26,22 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.8.0",
-    "gradio>=5.49.1",
-    "fastapi>=0.119.0",
+    "gradio>=6.1.0",
+    "fastapi>=0.125.0",
     "uvicorn[standard]>=0.35.0",
     "click>=8.2.1",
     "art>=6.5",
-    "tqdm>=4.67.1",
     "openpyxl>=3.1.5",
     "numpy>=2.2.6",
-    "pydantic>=2.11.7",
-    "matplotlib>=3.10.7",
+    "pydantic>=2.12.4",
     "sparsemax>=0.1.9",
     "loguru>=0.7.3",
     "charset_normalizer>=3.4.3",
-    "joblib>=1.5.2",
+    "joblib>=1.5.3",
     "scipy>=1.15.3",
     "catboost>=1.2.8",
-    "scikit-learn>=1.7.2"
+    "scikit-learn>=1.7.2",
+    "rich>=14.2.0"
 ]
 
 [project.scripts]
@@ -57,6 +57,9 @@ tap2 = [
     "resource/*"
 ]
 thermal_deformation = [
+    "resource/*"
+]
+heat_treatment = [
     "resource/*"
 ]
 

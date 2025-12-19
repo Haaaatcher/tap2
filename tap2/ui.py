@@ -1,7 +1,7 @@
 import gradio as gr
 import click
 from importlib import resources
-from tap2.utils import _get_ti_alloy_phys_prop, _get_ti_alloy_mech_prop, _get_ti_alloy_prop, _get_ti_alloy_wf
+from tap2.utils import _get_TA_phys_prop, _get_TA_mech_prop, _batch_get_TA_prop, _get_TA_WF, _get_TA_BTT
 
 
 @click.command()
@@ -77,24 +77,33 @@ def run_gradio(host, port):
                         mech_proc_mode = gr.State(value="simple")
                         with gr.Tabs():
                             with gr.Tab("快捷模式", id="simple") as mech_simple_mode:
-                                mech_htt = gr.Number(label="热处理温度 (℃)", value=600, minimum=-273.15, interactive=True)
-                                mech_gs = gr.Number(label="晶粒尺寸 (μm)", value=10, minimum=0, interactive=True)
+                                mech_HTT = gr.Number(label="热处理温度 (℃)", value=600, minimum=-273.15, interactive=True)
+                                mech_GS = gr.Number(label="晶粒尺寸 (μm)", value=10, minimum=0, interactive=True)
                             with gr.Tab("高级模式", id="advanced") as mech_advanced_mode:
-                                with gr.Accordion("热变形", open=True):
-                                    mech_td_htt = gr.Number(label="温度（℃）", info="Required", value=960, interactive=True)
-                                    mech_td_ts = gr.Number(label="真实应变", info="Required", value=0.8, interactive=True)
-                                    mech_td_sr = gr.Number(label="应变速率（1/s）", info="Required", value=0.1, interactive=True)
-                                    mech_td_init_gs = gr.Number(label="初始晶粒尺寸（μm）", info="Optional", value=100, interactive=True)
-                                    mech_td_btt = gr.Number(label="β相变温度（℃）", info="Optional", value=1000, interactive=True)
+                                gr.Markdown('#### 初始晶粒尺寸')
+                                mech_init_GS = gr.Number(label="初始晶粒尺寸（μm）", value=100, interactive=True)
+                                gr.Markdown('#### 热变形')
+                                mech_TD_temp = gr.Number(label="温度（℃）", value=960, interactive=True)
+                                mech_TD_TS = gr.Number(label="真实应变", value=0.8, interactive=True)
+                                mech_TD_SR = gr.Number(label="应变速率（1/s）", value=0.1, interactive=True)
+                                gr.Markdown('#### 热处理')
+                                mech_HT_param = gr.Dataframe(
+                                    value=[[900, 1], [400, 2]],
+                                    headers=['温度（℃）', '时间（h）'],
+                                    datatype=['number', 'number'],
+                                    type='pandas',
+                                    interactive=True,
+                                    show_row_numbers=True
+                                )
                         with gr.Row():
                             mech_clear_btn = gr.Button("重置", interactive=True)
                             mech_run_btn = gr.Button("提交", interactive=True)
                     with gr.Column():
                         gr.Markdown("### 力学性能")
-                        mech_ys = gr.Number(label="屈服强度 (MPa)", value=0, interactive=False, precision=3)
-                        mech_ts = gr.Number(label="抗拉强度 (MPa)", value=0, interactive=False, precision=3)
-                        mech_h = gr.Number(label="硬度 (VPN)", value=0, interactive=False, precision=3)
-                        mech_hp = gr.Number(label="霍尔佩奇系数 (MPa·m^(1/2))", value=0, interactive=False, precision=3)
+                        mech_YS = gr.Number(label="屈服强度 (MPa)", value=0, interactive=False, precision=3)
+                        mech_TS = gr.Number(label="抗拉强度 (MPa)", value=0, interactive=False, precision=3)
+                        mech_HD = gr.Number(label="硬度 (VPN)", value=0, interactive=False, precision=3)
+                        mech_HP = gr.Number(label="霍尔佩奇系数 (MPa·m^(1/2))", value=0, interactive=False, precision=3)
             with gr.Tab("相比例"):
                 with gr.Row():
                     with gr.Column():
@@ -120,21 +129,41 @@ def run_gradio(host, port):
                     with gr.Column():
                         gr.Markdown("### 相比例")
                         with gr.Row():
-                            wf_alpha = gr.Number(label="ALPHA (wt%)", value=0, interactive=False, precision=3)
-                            wf_beta = gr.Number(label="BETA (wt%)", value=0, interactive=False, precision=3)
-                            wf_laves = gr.Number(label="LAVES (wt%)", value=0, interactive=False, precision=3)
-                            wf_ti3al = gr.Number(label="TI3AL (wt%)", value=0, interactive=False, precision=3)
-                            wf_ti2cu = gr.Number(label="TI2CU (wt%)", value=0, interactive=False, precision=3)
-                            wf_ti5si3 = gr.Number(label="TI5SI3 (wt%)", value=0, interactive=False, precision=3)
-                            wf_tizrsi = gr.Number(label="TIZRSI (wt%)", value=0, interactive=False, precision=3)
-                            wf_ti2ni = gr.Number(label="TI2NI (wt%)", value=0, interactive=False, precision=3)
-                            wf_timb2 = gr.Number(label="TIM_B2 (wt%)", value=0, interactive=False, precision=3)
-                            wf_liquid = gr.Number(label="LIQUID (wt%)", value=0, interactive=False, precision=3)
-                            wf_c15fcc = gr.Number(label="C15_FCC (wt%)", value=0, interactive=False, precision=3)
-                            wf_mc = gr.Number(label="MC (wt%)", value=0, interactive=False, precision=3)
-                        wf_plot = gr.Plot()
+                            wf_ALPHA = gr.Number(label="ALPHA (wt%)", value=0, interactive=False, precision=3)
+                            wf_BETA = gr.Number(label="BETA (wt%)", value=0, interactive=False, precision=3)
+                            wf_LAVES = gr.Number(label="LAVES (wt%)", value=0, interactive=False, precision=3)
+                            wf_TI3AL = gr.Number(label="TI3AL (wt%)", value=0, interactive=False, precision=3)
+                            wf_TI2CU = gr.Number(label="TI2CU (wt%)", value=0, interactive=False, precision=3)
+                            wf_TI5SI3 = gr.Number(label="TI5SI3 (wt%)", value=0, interactive=False, precision=3)
+                            wf_TIZRSI = gr.Number(label="TIZRSI (wt%)", value=0, interactive=False, precision=3)
+                            wf_TI2NI = gr.Number(label="TI2NI (wt%)", value=0, interactive=False, precision=3)
+                            wf_TIM_B2 = gr.Number(label="TIM_B2 (wt%)", value=0, interactive=False, precision=3)
+                            wf_LIQUID = gr.Number(label="LIQUID (wt%)", value=0, interactive=False, precision=3)
+                            wf_C15_FCC = gr.Number(label="C15_FCC (wt%)", value=0, interactive=False, precision=3)
+                            wf_MC = gr.Number(label="MC (wt%)", value=0, interactive=False, precision=3)
             with gr.Tab("β-转变温度"):
-                gr.Markdown("即将到来...")
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("### 元素组成")
+                        with gr.Row():
+                            btt_Ti = gr.Number(label=f"Ti (wt%)", value=100, minimum=0, maximum=100, interactive=False)
+                            btt_Al = gr.Number(label=f"Al (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Si = gr.Number(label=f"Si (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Cr = gr.Number(label=f"Cr (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Fe = gr.Number(label=f"Fe (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Ni = gr.Number(label=f"Ni (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Cu = gr.Number(label=f"Cu (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Zr = gr.Number(label=f"Zr (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Nb = gr.Number(label=f"Nb (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Mo = gr.Number(label=f"Mo (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_V = gr.Number(label=f"V (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                            btt_Sn = gr.Number(label=f"Sn (wt%)", value=0, minimum=0, maximum=100, interactive=True)
+                        with gr.Row():
+                            btt_clear_btn = gr.Button("重置", interactive=True)
+                            btt_run_btn = gr.Button("提交", interactive=True)
+                    with gr.Column():
+                        gr.Markdown("### β-转变温度")
+                        btt_num = gr.Number(label="β-转变温度（℃）", value=0, interactive=False, precision=3)
             with gr.Tab("批量模式"):
                 with gr.Row():
                     with gr.Column():
@@ -173,7 +202,7 @@ def run_gradio(host, port):
                      phys_ym, phys_bm, phys_sm, phys_pr, phys_se, phys_shc]
         )
         phys_run_btn.click(
-            fn=_get_ti_alloy_phys_prop,
+            fn=_get_TA_phys_prop,
             inputs=[phys_Ti, phys_H, phys_B, phys_C, phys_N, phys_O, phys_Al, phys_Si, phys_Cr, phys_Fe, phys_Ni,
                     phys_Cu, phys_Zr, phys_Nb, phys_Mo, phys_V, phys_Sn, phys_htt],
             outputs=[phys_te, phys_d, phys_tc, phys_ec, phys_ym, phys_bm, phys_sm, phys_pr, phys_se, phys_shc]
@@ -189,17 +218,18 @@ def run_gradio(host, port):
         mech_simple_mode.select(fn=lambda: "simple", outputs=mech_proc_mode)
         mech_advanced_mode.select(fn=lambda: "advanced", outputs=mech_proc_mode)
         mech_clear_btn.click(
-            fn=lambda: [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 600, 10, 960, 0.8, 0.1, 100, 1000, 0, 0, 0, 0],
+            fn=lambda: [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 600, 10, 100, 960, 0.8, 0.1,
+                        [[900, 1], [400, 2]], 0, 0, 0, 0],
             outputs=[mech_Ti, mech_H, mech_B, mech_C, mech_N, mech_O, mech_Al, mech_Si, mech_Cr, mech_Fe, mech_Ni,
-                     mech_Cu, mech_Zr, mech_Nb, mech_Mo, mech_V, mech_Sn, mech_htt, mech_gs, mech_td_htt, mech_td_ts,
-                     mech_td_sr, mech_td_init_gs, mech_td_btt, mech_ys, mech_ts, mech_h, mech_hp]
+                     mech_Cu, mech_Zr, mech_Nb, mech_Mo, mech_V, mech_Sn, mech_HTT, mech_GS, mech_init_GS, mech_TD_temp,
+                     mech_TD_TS, mech_TD_SR, mech_HT_param, mech_YS, mech_TS, mech_HD, mech_HP]
         )
         mech_run_btn.click(
-            fn=_get_ti_alloy_mech_prop,
+            fn=_get_TA_mech_prop,
             inputs=[mech_Ti, mech_H, mech_B, mech_C, mech_N, mech_O, mech_Al, mech_Si, mech_Cr, mech_Fe, mech_Ni,
-                    mech_Cu, mech_Zr, mech_Nb, mech_Mo, mech_V, mech_Sn, mech_proc_mode, mech_htt, mech_gs, mech_td_htt,
-                    mech_td_ts, mech_td_sr, mech_td_init_gs, mech_td_btt],
-            outputs=[mech_ys, mech_ts, mech_h, mech_hp]
+                    mech_Cu, mech_Zr, mech_Nb, mech_Mo, mech_V, mech_Sn, mech_proc_mode, mech_HTT, mech_GS,
+                    mech_init_GS, mech_TD_temp, mech_TD_TS, mech_TD_SR, mech_HT_param],
+            outputs=[mech_YS, mech_TS, mech_HD, mech_HP]
         )
         for mech_elem in [mech_H, mech_B, mech_C, mech_N, mech_O, mech_Al, mech_Si, mech_Cr, mech_Fe, mech_Ni, mech_Cu,
                           mech_Zr, mech_Nb, mech_Mo, mech_V, mech_Sn]:
@@ -210,7 +240,7 @@ def run_gradio(host, port):
                 outputs=mech_Ti
             )
         batch_run_btn.click(
-            fn=_get_ti_alloy_prop,
+            fn=_batch_get_TA_prop,
             inputs=[checkboxes, up_files],
             outputs=down_files
         )
@@ -225,16 +255,16 @@ def run_gradio(host, port):
             outputs=[up_files, down_files, checkboxes]
         )
         wf_clear_btn.click(
-            fn=lambda: [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None],
+            fn=lambda: [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             outputs=[wf_Ti, wf_Al, wf_Si, wf_Cr, wf_Fe, wf_Ni, wf_Cu, wf_Zr, wf_Nb, wf_Mo, wf_V, wf_Sn, wf_htt,
-                     wf_alpha, wf_beta, wf_laves, wf_ti3al, wf_ti2cu, wf_ti5si3, wf_tizrsi, wf_ti2ni, wf_timb2,
-                     wf_liquid, wf_c15fcc, wf_mc, wf_plot]
+                     wf_ALPHA, wf_BETA, wf_LAVES, wf_TI3AL, wf_TI2CU, wf_TI5SI3, wf_TIZRSI, wf_TI2NI, wf_TIM_B2,
+                     wf_LIQUID, wf_C15_FCC, wf_MC]
         )
         wf_run_btn.click(
-            fn=_get_ti_alloy_wf,
+            fn=_get_TA_WF,
             inputs=[wf_Ti, wf_Al, wf_Si, wf_Cr, wf_Fe, wf_Ni, wf_Cu, wf_Zr, wf_Nb, wf_Mo, wf_V, wf_Sn, wf_htt],
-            outputs=[wf_alpha, wf_beta, wf_laves, wf_ti3al, wf_ti2cu, wf_ti5si3, wf_tizrsi, wf_ti2ni, wf_timb2,
-                     wf_liquid, wf_c15fcc, wf_mc, wf_plot]
+            outputs=[wf_ALPHA, wf_BETA, wf_LAVES, wf_TI3AL, wf_TI2CU, wf_TI5SI3, wf_TIZRSI, wf_TI2NI, wf_TIM_B2,
+                     wf_LIQUID, wf_C15_FCC, wf_MC]
         )
         for wf_elem in [wf_Al, wf_Si, wf_Cr, wf_Fe, wf_Ni, wf_Cu, wf_Zr, wf_Nb, wf_Mo, wf_V, wf_Sn]:
             wf_elem.change(
@@ -242,4 +272,19 @@ def run_gradio(host, port):
                 inputs=[wf_Al, wf_Si, wf_Cr, wf_Fe, wf_Ni, wf_Cu, wf_Zr, wf_Nb, wf_Mo, wf_V, wf_Sn],
                 outputs=wf_Ti
             )
+        for btt_elem in [btt_Al, btt_Si, btt_Cr, btt_Fe, btt_Ni, btt_Cu, btt_Zr, btt_Nb, btt_Mo, btt_V, btt_Sn]:
+            btt_elem.change(
+                fn=lambda *args: 100 - sum(arg for arg in args if arg is not None),
+                inputs=[btt_Al, btt_Si, btt_Cr, btt_Fe, btt_Ni, btt_Cu, btt_Zr, btt_Nb, btt_Mo, btt_V, btt_Sn],
+                outputs=btt_Ti
+            )
+        btt_clear_btn.click(
+            fn=lambda: [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            outputs=[btt_Ti, btt_Al, btt_Si, btt_Cr, btt_Fe, btt_Ni, btt_Cu, btt_Zr, btt_Nb, btt_Mo, btt_V, btt_Sn, btt_num]
+        )
+        btt_run_btn.click(
+            fn=_get_TA_BTT,
+            inputs=[btt_Ti, btt_Al, btt_Si, btt_Cr, btt_Fe, btt_Ni, btt_Cu, btt_Zr, btt_Nb, btt_Mo, btt_V, btt_Sn],
+            outputs=btt_num
+        )
     index.queue(max_size=32, default_concurrency_limit=4).launch(server_name=host, server_port=port, share=False)

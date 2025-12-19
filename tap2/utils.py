@@ -2,40 +2,21 @@ import csv
 import numpy as np
 import openpyxl
 import gradio as gr
-import matplotlib.pyplot as plt
 import charset_normalizer
 from pathlib import Path
 from typing import Dict, List
 from gradio.utils import NamedString
 from tempfile import NamedTemporaryFile
-from matplotlib.font_manager import FontProperties
-from importlib import resources
+from pandas import DataFrame, to_numeric
 from tap2.core import TAPPInput, TAPPInfer, _MAX_BATCH_SIZE, TAPPBatchInput
 from loguru import logger
-from thermal_deformation import predict_grain_size
+from thermal_deformation import predict_grain_size as TD_pred_GS
+from heat_treatment import predict_grain_size as HT_pred_GS, model as HT_model, feats as HT_feats
+from math import isclose
+
 
 
 _TAPP_INFER = TAPPInfer()
-
-
-_MSYH_FONT = FontProperties(fname=str(resources.files("tap2.resource").joinpath("msyh.ttc")))
-
-
-_PHASE_COLOR_MAP = {
-    "ALPHA": "#1f77b4",
-    "BETA": "#ff7f0e",
-    "LAVES": "#2ca02c",
-    "TI3AL": "#d62728",
-    "TI2CU": "#9467bd",
-    "TI5SI3": "#8c564b",
-    "TIZRSI": "#e377c2",
-    "TI2NI": "#bcbd22",
-    "TIM_B2": "#17becf",
-    "LIQUID": "#aec7e8",
-    "C15_FCC": "#ffbb78",
-    "MC": "#9edae5"
-}
-
 
 _PROP_ZH2ABBR_MAP = {
     "热膨胀系数": "TE",
@@ -53,7 +34,6 @@ _PROP_ZH2ABBR_MAP = {
     "硬度": "HD",
     "霍尔佩奇系数": "HP"
 }
-
 
 _PROP_ZH2UNIT_MAP = {
     "热膨胀系数": "10^-6/K",
@@ -73,13 +53,9 @@ _PROP_ZH2UNIT_MAP = {
 }
 
 
-def _get_ti_alloy_phys_prop(Ti: float | None, H: float | None, B: float | None,  C: float | None, N: float | None,
-                            O: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None,
-                            Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None,
-                            V: float | None, Sn: float | None, htt: float | None) -> List[float | None]:
+def _get_TA_phys_prop(Ti: float | None, H: float | None, B: float | None, C: float | None, N: float | None, O: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None, Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None, V: float | None, Sn: float | None, HTT: float | None) -> List[float | None]:
     """
-    Gradio 接口：根据钛合金的元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）和处理工艺（热处理温度），获取其
-    物理性能（热膨胀系数、密度、热导率、电导率、杨氏模量、体积模量、剪切模量、泊松比、比焓、比热容）。
+    Gradio 接口：根据钛合金的元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）和处理工艺（热处理温度），获取其物理性能（热膨胀系数、密度、热导率、电导率、杨氏模量、体积模量、剪切模量、泊松比、比焓、比热容）。
     :param Ti: Ti 的质量分数
     :param H: H 的质量分数
     :param B: B 的质量分数
@@ -97,15 +73,16 @@ def _get_ti_alloy_phys_prop(Ti: float | None, H: float | None, B: float | None, 
     :param Mo: Mo 的质量分数
     :param V: V 的质量分数
     :param Sn: Sn 的质量分数
-    :param htt: 热处理温度（摄氏度）
+    :param HTT: 热处理温度（摄氏度）
     :return: 物理性能值列表，依次是：热膨胀系数（10^-6/K）、密度（g/cm^3）、热导率（W/m·K）、电导率（10^6 S/m）、杨氏模量（GPa）、
-        体积模量（GPa）、剪切模量（GPa）、泊松比、比焓（J/g）、比热容（J/g·K），均为浮点数。
+    体积模量（GPa）、剪切模量（GPa）、泊松比、比焓（J/g）、比热容（J/g·K），均为浮点数。
     """
-    if not _validate_composition(Ti, H, B, C, N, O, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
+    if not _valid_comp(Ti, H, B, C, N, O, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
         gr.Warning("请输入正确的成分！")
         return [None] * 10
     prop_values = []
     for prop_abbr in ["TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC"]:
+        # noinspection PyTypeChecker
         tapp_input = TAPPInput(
             Prop=prop_abbr,
             Ti = Ti if Ti is not None else 0,
@@ -125,7 +102,7 @@ def _get_ti_alloy_phys_prop(Ti: float | None, H: float | None, B: float | None, 
             Mo = Mo if Mo is not None else 0,
             V = V if V is not None else 0,
             Sn = Sn if Sn is not None else 0,
-            HTT = htt if htt is not None else 600,
+            HTT = HTT if HTT is not None else 600,
         )
         tapp_output = _TAPP_INFER(tapp_input)
         prop_values.append(tapp_output.value)
@@ -135,19 +112,13 @@ def _get_ti_alloy_phys_prop(Ti: float | None, H: float | None, B: float | None, 
     return prop_values
 
 
-def _get_ti_alloy_mech_prop(Ti: float | None, H: float | None, B: float | None, C: float | None, N: float | None,
-                            O: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None,
-                            Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None,
-                            V: float | None, Sn: float | None, proc_mode: str, simple_htt: float | None,
-                            simple_gs: float | None, td_htt: float | None, td_ts: float | None, td_sr: float | None,
-                            td_init_gs: float | None, td_btt: float | None) -> List[float | None]:
+def _get_TA_mech_prop(Ti: float | None, H: float | None, B: float | None, C: float | None, N: float | None, O: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None, Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None, V: float | None, Sn: float | None, proc_mode: str, HTT: float | None, GS: float | None, init_GS: float | None, TD_temp: float | None, TD_TS: float | None, TD_SR: float | None, HT_param: DataFrame) -> List[float | None]:
     """
-    Gradio 接口：根据钛合金的元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）、处理工艺（热处理温度）、晶粒尺寸，
-    获取其力学性能（屈服强度、抗拉强度、维氏硬度、霍尔佩奇系数）。
+    Gradio 接口：根据钛合金的元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）、处理工艺（热处理温度）、晶粒尺寸，获取其力学性能（屈服强度、抗拉强度、维氏硬度、霍尔佩奇系数）。高级模式：通过热变形和热处理模块计算晶粒尺寸。
     :param Ti: Ti 的质量分数
     :param H: H 的质量分数
     :param B: B 的质量分数
-    :param C: C 的质量分数J
+    :param C: C 的质量分数
     :param N: N 的质量分数
     :param O: O 的质量分数
     :param Al: Al 的质量分数
@@ -161,46 +132,92 @@ def _get_ti_alloy_mech_prop(Ti: float | None, H: float | None, B: float | None, 
     :param Mo: Mo 的质量分数
     :param V: V 的质量分数
     :param Sn: Sn 的质量分数
-    :param simple_htt: 热处理温度（摄氏度）
-    :param simple_gs: 晶粒尺寸（微米）
+    :param proc_mode: 处理工艺模式：simple-快捷模式、advanced-高级模式
+    :param HTT: 快捷模式：热处理温度（摄氏度）
+    :param GS: 快捷模式：晶粒尺寸（微米）
+    :param init_GS: 高级模式：初始晶粒尺寸（微米）
+    :param TD_temp: 高级模式：热变形温度（摄氏度）
+    :param TD_TS: 高级模式：热变形真实应变
+    :param TD_SR: 高级模式：热变形应变速率（1/s）
+    :param HT_param: 高级模式：热处理参数 DataFrame，每一行表示一组工艺：[温度（摄氏度），保温时间（小时）]
     :return: 力学性能列表，依次是：屈服强度（MPa）、抗拉强度（MPa）、维氏硬度（VPN）、霍尔佩奇系数（MPa·m^(1/2)）。
     """
-    # 检查：元素浓度之和为 100%
-    if not _validate_composition(Ti, H, B, C, N, O, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
+    if not _valid_comp(Ti, H, B, C, N, O, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
         gr.Warning("请输入正确的成分！")
-        return [None] * 10
+        return [None] * 4
     prop_values = []
-    if proc_mode == "simple":
-        htt = simple_htt
-        grain_size = simple_gs
-    elif proc_mode == "advanced":
-        htt = td_htt
-        if any(required_param is None for required_param in (td_htt, td_ts, td_sr)):
-            gr.Warning("请输入完整的热变形参数！")
-            return [None] * 10
-        # 构建组成字符串
+    if proc_mode == 'simple':
+        if HTT is None or GS is None:
+            gr.Warning('【快捷模式】请输入完整的工艺参数！')
+            return [None] * 4
+        _HTT = HTT
+        _GS = GS
+    else:
+        HT_param = HT_param.apply(to_numeric, errors='coerce')
+        if any(_ is None for _ in (init_GS, TD_temp, TD_TS, TD_SR)) or not (1 <= len(HT_param) <= 5):
+            gr.Warning('【高级模式】请输入完整的热变形和热处理参数！')
+            return [None] * 4
+        _HTT = HT_param['温度（℃）'].max()
         comp_sub_strs = ["Ti"]
         for elem_name in ("H", "B", "C", "N", "O", "Al", "Si", "Cr", "Fe", "Ni", "Cu", "Zr", "Nb", "Mo", "V", "Sn"):
             elem_conc = locals()[elem_name]
             if elem_conc is not None and abs(elem_conc) > 1e-6:
                 comp_sub_strs.append(f"{elem_conc:f}".rstrip("0").rstrip(".") + elem_name)
-        composition_str = "-".join(comp_sub_strs)
-        # 构建命名参数字典
-        param_dict = {
-            "composition": composition_str,
-            "temperature": td_htt,
-            "true_strain": td_ts,
-            "strain_rate": td_sr,
+        comp_str = "-".join(comp_sub_strs)
+        tapp_input = TAPPInput(
+            Prop='BTT',
+            Ti=Ti if Ti is not None else 0,
+            Al=Al if Al is not None else 0,
+            Si=Si if Si is not None else 0,
+            Cr=Cr if Cr is not None else 0,
+            Fe=Fe if Fe is not None else 0,
+            Ni=Ni if Ni is not None else 0,
+            Cu=Cu if Cu is not None else 0,
+            Zr=Zr if Zr is not None else 0,
+            Nb=Nb if Nb is not None else 0,
+            Mo=Mo if Mo is not None else 0,
+            V=V if V is not None else 0,
+            Sn=Sn if Sn is not None else 0
+        )
+        tapp_output = _TAPP_INFER(tapp_input)
+        BTT = tapp_output.value
+        logger.info(f'THERMAL DEFORMATION: COMPOSITION={comp_str}, TRUE_STRAIN={TD_TS:f}, STRAIN_RATE={TD_SR:f}, '
+                    f'TEMPERATURE={TD_temp:f}, INITIAL_GRAIN_SIZE={init_GS:f}, BETA_TRANS_TEMP={BTT:f}')
+        _GS = TD_pred_GS(
+            composition=comp_str,
+            true_strain=TD_TS,
+            strain_rate=TD_SR,
+            temperature=TD_temp,
+            initial_grain_size=init_GS,
+            beta_trans_temp=BTT
+        )
+        logger.info(f'THERMAL DEFORMATION: GS={_GS:f}')
+        comp_dict = {
+            'Ti': Ti if Ti is not None else 0,
+            'Al': Al if Al is not None else 0,
+            'Si': Si if Si is not None else 0,
+            'Cr': Cr if Cr is not None else 0,
+            'Fe': Fe if Fe is not None else 0,
+            'Ni': Ni if Ni is not None else 0,
+            'Cu': Cu if Cu is not None else 0,
+            'Zr': Zr if Zr is not None else 0,
+            'Nb': Nb if Nb is not None else 0,
+            'Mo': Mo if Mo is not None else 0,
+            'V': V if V is not None else 0,
+            'Sn': Sn if Sn is not None else 0
         }
-        if td_init_gs is not None:
-            param_dict["initial_grain_size"] = td_init_gs
-        if td_btt is not None:
-            param_dict["beta_trans_temp"] = td_btt
-        logger.info(f"Predicting <GS>: {param_dict}")
-        grain_size = predict_grain_size(**param_dict)
-        logger.info(f"Predicted <GS>: {param_dict} ==> {grain_size}")
-    else:
-        raise ValueError(f"Unknown process mode: {proc_mode}")
+        logger.info(f'HEAT TREATMENT: D0={_GS:f}, MANUAL_T_BETA={BTT:f}, COMPOSITION={comp_dict}, '
+                    f'HEAT_TREATMENTS={HT_param.to_numpy().tolist()}')
+        HT_results = HT_pred_GS(
+            D0=_GS,
+            manual_T_beta=BTT,
+            composition=comp_dict,
+            heat_treatments=HT_param.to_numpy().tolist(),
+            ml_model=HT_model,
+            feature_names=HT_feats
+        )
+        _GS = HT_results[len(HT_param) - 1]['D']
+        logger.info(f'HEAT TREATMENT: GS={_GS:f}')
     for prop_abbr in ["YS", "TS", "HD", "HP"]:
         tapp_input = TAPPInput(
             Prop=prop_abbr,
@@ -221,22 +238,20 @@ def _get_ti_alloy_mech_prop(Ti: float | None, H: float | None, B: float | None, 
             Mo = Mo if Mo is not None else 0,
             V = V if V is not None else 0,
             Sn = Sn if Sn is not None else 0,
-            HTT = simple_htt if simple_htt is not None else 600,
-            GS = grain_size if grain_size is not None else 10,
+            HTT = _HTT,
+            GS = _GS
         )
         tapp_output = _TAPP_INFER(tapp_input)
-        prop_values.append(tapp_output.value)
+        prop_value = tapp_output.value
+        prop_values.append(prop_value)
     return prop_values
 
 
 def _get_inputs_from_csv(csv_path: Path) -> Dict[str, List[float]]:
     """
-    从 CSV 文件中读取钛合金性能预测的输入数据，格式为字典，字典字段包含元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、
-    V、Sn）、热处理温度、晶粒尺寸，不存在则填充相应的默认值。
+    从 CSV 文件中读取钛合金性能预测的输入数据，格式为字典，字典字段包含元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）、热处理温度、晶粒尺寸，不存在则填充相应的默认值。
     :param csv_path: CSV 文件路径
-    :return: 输入数据列表，例如：{"Ti": [90], "H": [0], "B": [0], "C": [0], "N": [0], "O": [0], "Al": [6], "Si": [0],
-        "Cr": [0], "Fe": [0], "Ni": [0], "Cu": [0], "Zr": [0], "Nb": [0], "Mo": [0], "V": [4], "Sn": [0], "HTT": [600],
-        "GS": [10]}
+    :return: 输入数据列表，例如：{"Ti": [90], "H": [0], "B": [0], "C": [0], "N": [0], "O": [0], "Al": [6], "Si": [0], "Cr": [0], "Fe": [0], "Ni": [0], "Cu": [0], "Zr": [0], "Nb": [0], "Mo": [0], "V": [4], "Sn": [0], "HTT": [600], "GS": [10]}
     """
     inputs = {
         "Ti": [],
@@ -280,12 +295,9 @@ def _get_inputs_from_csv(csv_path: Path) -> Dict[str, List[float]]:
 
 def _get_inputs_from_xlsx(xlsx_path: Path) -> Dict[str, List[float]]:
     """
-    从 XLSX 文件中读取钛合金性能预测的输入数据，格式为字典列表，字典字段包含元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、
-    Mo、V、Sn）、热处理温度、晶粒尺寸，不存在则填充相应的默认值。
+    从 XLSX 文件中读取钛合金性能预测的输入数据，格式为字典列表，字典字段包含元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）、热处理温度、晶粒尺寸，不存在则填充相应的默认值。
     :param xlsx_path: XLSX 文件路径
-    :return: 输入数据列表，例如：{"Ti": [90], "H": [0], "B": [0], "C": [0], "N": [0], "O": [0], "Al": [6], "Si": [0],
-        "Cr": [0], "Fe": [0], "Ni": [0], "Cu": [0], "Zr": [0], "Nb": [0], "Mo": [0], "V": [4], "Sn": [0], "HTT": [600],
-        "GS": [10]}
+    :return: 输入数据列表，例如：{"Ti": [90], "H": [0], "B": [0], "C": [0], "N": [0], "O": [0], "Al": [6], "Si": [0], "Cr": [0], "Fe": [0], "Ni": [0], "Cu": [0], "Zr": [0], "Nb": [0], "Mo": [0], "V": [4], "Sn": [0], "HTT": [600], "GS": [10]}
     """
     inputs = {
         "Ti": [],
@@ -389,12 +401,10 @@ def _write_outputs_to_xlsx(input_xlsx_path: Path, append_header: List[str], outp
     return output_path
 
 
-def _get_ti_alloy_prop(prop_names: List[str], input_files: List[NamedString] | None) -> List[str]:
+def _batch_get_TA_prop(prop_names: List[str], input_files: List[NamedString] | None) -> List[str]:
     """
-    Gradio 接口：根据钛合金的元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）、处理工艺（热处理温度）、晶粒尺寸，
-    批量获取其性能，支持 CSV 和 XLSX 文件格式。
-    :param prop_names: 需计算的性能名称列表（热膨胀系数、密度、热导率、电导率、杨氏模量、体积模量、剪切模量、泊松比、比焓、比热容、
-        屈服强度、抗拉强度、硬度、霍尔佩奇系数）
+    Gradio 接口：根据钛合金的元素组成（Ti、H、B、C、N、O、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）、处理工艺（热处理温度）、晶粒尺寸，批量获取其性能，支持 CSV 和 XLSX 文件格式。
+    :param prop_names: 需计算的性能名称列表（热膨胀系数、密度、热导率、电导率、杨氏模量、体积模量、剪切模量、泊松比、比焓、比热容、屈服强度、抗拉强度、硬度、霍尔佩奇系数）
     :param input_files: 需计算的输入文件列表
     :return: 计算结果文件列表
     """
@@ -446,12 +456,9 @@ def _get_ti_alloy_prop(prop_names: List[str], input_files: List[NamedString] | N
     return output_paths
 
 
-def _get_ti_alloy_wf(Ti: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None,
-                     Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None,
-                     V: float | None, Sn: float | None, htt: float | None) -> List:
+def _get_TA_WF(Ti: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None, Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None, V: float | None, Sn: float | None, HTT: float | None) -> List[float | None]:
     """
-    Gradio 接口：根据钛合金的元素组成（Ti、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）和处理工艺（热处理温度），获取其相比例（ALPHA、BETA、
-    LAVES、TI3AL、TI2CU、TI5SI3、TIZRSI、TI2NI、TIM_B2、LIQUID、C15_FCC、MC）。
+    Gradio 接口：根据钛合金的元素组成（Ti、Al、Si、Cr、Fe、Ni、Cu、Zr、Nb、Mo、V、Sn）和处理工艺（热处理温度），获取其相比例（ALPHA、BETA、LAVES、TI3AL、TI2CU、TI5SI3、TIZRSI、TI2NI、TIM_B2、LIQUID、C15_FCC、MC）。
     :param Ti: Ti 的质量分数
     :param Al: Al 的质量分数
     :param Si: Si 的质量分数
@@ -464,22 +471,14 @@ def _get_ti_alloy_wf(Ti: float | None, Al: float | None, Si: float | None, Cr: f
     :param Mo: Mo 的质量分数
     :param V: V 的质量分数
     :param Sn: Sn 的质量分数
-    :param htt: 热处理温度（摄氏度）
-    :return: 相比例及其饼图（质量分数）
+    :param HTT: 热处理温度（摄氏度）
     """
-    # 检查：元素浓度之和为 100 wt%
-    if not _validate_composition(Ti, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
+    if not _valid_comp(Ti, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
         gr.Warning("请输入正确的成分！")
-        return [None] * 13
-    # 构建输入
+        return [None] * 12
     tapp_input = TAPPInput(
-        Prop="WF",
+        Prop='WF',
         Ti=Ti if Ti is not None else 0,
-        H=0,
-        B=0,
-        C=0,
-        N=0,
-        O=0,
         Al=Al if Al is not None else 0,
         Si=Si if Si is not None else 0,
         Cr=Cr if Cr is not None else 0,
@@ -491,43 +490,43 @@ def _get_ti_alloy_wf(Ti: float | None, Al: float | None, Si: float | None, Cr: f
         Mo=Mo if Mo is not None else 0,
         V=V if V is not None else 0,
         Sn=Sn if Sn is not None else 0,
-        HTT=htt if htt is not None else 600,
+        HTT=HTT if HTT is not None else 600,
     )
-    # 获取输出
     tapp_output = _TAPP_INFER(tapp_input)
-    # 转为质量分数
-    for k, v in tapp_output.value.items():
-        tapp_output.value[k] = v * 100
-    # 绘制饼图
-    pos_labels = []
-    pos_sizes = []
-    pos_colors = []
-    for k, v in tapp_output.value.items():
-        if abs(v) > 1e-3:
-            pos_labels.append(f"{k} ({v:.3f}%)")
-            pos_sizes.append(v)
-            pos_colors.append(_PHASE_COLOR_MAP[k])
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.pie(
-        pos_sizes,
-        labels=pos_labels,
-        colors=pos_colors,
-        startangle=90,
-        textprops={"fontproperties": _MSYH_FONT, "fontsize": "medium"}
-    )
-    ax.set_title("相比例 (wt%)", fontproperties=_MSYH_FONT, pad=20, fontsize="x-large")
-    ax.axis("equal")
-    return [tapp_output.value["ALPHA"], tapp_output.value["BETA"], tapp_output.value["LAVES"],
-            tapp_output.value["TI3AL"], tapp_output.value["TI2CU"], tapp_output.value["TI5SI3"],
-            tapp_output.value["TIZRSI"], tapp_output.value["TI2NI"], tapp_output.value["TIM_B2"],
-            tapp_output.value["LIQUID"], tapp_output.value["C15_FCC"], tapp_output.value["MC"], fig]
+    return [tapp_output.value.ALPHA, tapp_output.value.BETA, tapp_output.value.LAVES, tapp_output.value.TI3AL,
+            tapp_output.value.TI2CU, tapp_output.value.TI5SI3, tapp_output.value.TIZRSI, tapp_output.value.TI2NI,
+            tapp_output.value.TIM_B2, tapp_output.value.LIQUID, tapp_output.value.C15_FCC, tapp_output.value.MC]
 
 
-def _validate_composition(*args) -> bool:
+def _valid_comp(*args) -> bool:
     """
     验证钛合金成分之和是否为 100 wt%
     :param args: 各元素的质量分数
     :return: 成分之和为 100 wt% 返回 True，否则返回 False
     """
     total_comp = sum(elem_conc for elem_conc in args if elem_conc is not None)
-    return abs(total_comp - 100) <= 1e-6
+    return isclose(total_comp, 100, abs_tol=1e-6)
+
+
+def _get_TA_BTT(Ti: float | None, Al: float | None, Si: float | None, Cr: float | None, Fe: float | None, Ni: float | None, Cu: float | None, Zr: float | None, Nb: float | None, Mo: float | None, V: float | None, Sn: float | None) -> float | None:
+    if not _valid_comp(Ti, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
+        gr.Warning("请输入正确的成分！")
+        return None
+    tapp_input = TAPPInput(
+        Prop='BTT',
+        Ti=Ti if Ti is not None else 0,
+        Al=Al if Al is not None else 0,
+        Si=Si if Si is not None else 0,
+        Cr=Cr if Cr is not None else 0,
+        Fe=Fe if Fe is not None else 0,
+        Ni=Ni if Ni is not None else 0,
+        Cu=Cu if Cu is not None else 0,
+        Zr=Zr if Zr is not None else 0,
+        Nb=Nb if Nb is not None else 0,
+        Mo=Mo if Mo is not None else 0,
+        V=V if V is not None else 0,
+        Sn=Sn if Sn is not None else 0
+    )
+    tapp_output = _TAPP_INFER(tapp_input)
+    btt_value = tapp_output.value
+    return btt_value

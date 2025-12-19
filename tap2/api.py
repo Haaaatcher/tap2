@@ -4,8 +4,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from tap2.core import TAPPInfer, TAPPInput, TAPPOutput, TAPPBatchInput, TAPPBatchOutput
 
-_app = FastAPI(title="TAP2", description="Use TAP2 for property prediction of titanium alloy.", version="0.0.7")
-
+_app = FastAPI(
+    title="TAP2",
+    description="Use TAP2 for property prediction of titanium alloy.",
+    version="0.0.8"
+)
 
 _app.add_middleware(
     CORSMiddleware,
@@ -15,7 +18,6 @@ _app.add_middleware(
     allow_headers=["*"],
 )
 
-
 _tapp_infer = TAPPInfer()
 
 
@@ -23,10 +25,10 @@ _tapp_infer = TAPPInfer()
 async def root():
     return {
         "app": "TAPP",
-        "version": "0.0.7",
+        "version": "0.0.8",
         "author": "Hang Luo",
         "email": "haaaatcher@gmail.com",
-        "description": "Use TAPP for property prediction of titanium alloy."
+        "description": "Use TAP2 for property prediction of titanium alloy."
     }
 
 
