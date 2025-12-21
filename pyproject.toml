@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tap2"
-version = "0.0.8"
+version = "0.0.8b1"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -54,7 +54,8 @@ include-package-data = true
 [tool.setuptools.package-data]
 tap2 = [
     "weight/*",
-    "resource/*"
+    "resource/*",
+    "database/*"
 ]
 thermal_deformation = [
     "resource/*"
