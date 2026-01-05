@@ -16,7 +16,7 @@ def run_gradio(host, port):
                     with gr.Column():
                         gr.Markdown("### 元素组成")
                         with gr.Row():
-                            TA_Ti = gr.Number(label='Ti (wt%)', value=100, minimum=0, maximum=100, interactive=False)
+                            TA_Ti = gr.Number(label='Ti (wt%)', value=100, minimum=0, maximum=100, interactive=True)
                             TA_Al = gr.Number(label='Al (wt%)', value=0, minimum=0, maximum=100, interactive=True)
                             TA_V = gr.Number(label='V (wt%)', value=0, minimum=0, maximum=100, interactive=True)
                             TA_Cr = gr.Number(label='Cr (wt%)', value=0, minimum=0, maximum=100, interactive=True)
@@ -40,7 +40,7 @@ def run_gradio(host, port):
                     with gr.Column():
                         gr.Markdown("### 元素组成")
                         with gr.Row():
-                            AA_Al = gr.Number(label='Al (wt%)', value=100, minimum=0, maximum=100, interactive=False)
+                            AA_Al = gr.Number(label='Al (wt%)', value=100, minimum=0, maximum=100, interactive=True)
                             AA_Mg = gr.Number(label='Mg (wt%)', value=0, minimum=0, maximum=100, interactive=True)
                             AA_Si = gr.Number(label='Si (wt%)', value=0, minimum=0, maximum=100, interactive=True)
                             AA_Cr = gr.Number(label='Cr (wt%)', value=0, minimum=0, maximum=100, interactive=True)

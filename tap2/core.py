@@ -755,13 +755,15 @@ class TAPPInfer:
         """
         task_flag = self._short_task_flag(tapp_input.sha256)
         if isinstance(tapp_input, TAPPInput):
-            logger.info(f'[{task_flag}] TAP2 INFERRING: INPUT = {tapp_input}')
+            if not self._sil:
+                logger.info(f'[{task_flag}] TAP2 INFERRING: INPUT = {tapp_input}')
             infer_func = self._infer
             corr_func = self._corr
             output_type = TAPPOutput
             phase_ratio_type = TAPPPhaseRatio
         else:
-            logger.info(f'[{task_flag}] TAP2 BATCH INFERRING: PROP = {tapp_input.Prop}, SIZE = {len(tapp_input)} its')
+            if not self._sil:
+                logger.info(f'[{task_flag}] TAP2 BATCH INFERRING: PROP = {tapp_input.Prop}, SIZE = {len(tapp_input)} its')
             infer_func = self._batch_infer
             corr_func = self._batch_corr
             output_type = TAPPBatchOutput
@@ -787,7 +789,9 @@ class TAPPInfer:
         else:
             tapp_output = output_type(Prop=tapp_input.Prop, value=output_value)
         if isinstance(tapp_output, TAPPOutput):
-            logger.info(f'[{task_flag}] TAP2 INFERRED: OUTPUT = {tapp_output}')
+            if not self._sil:
+                logger.info(f'[{task_flag}] TAP2 INFERRED: OUTPUT = {tapp_output}')
         else:
-            logger.info(f'[{task_flag}] TAP2 BATCH INFERRED: PROP = {tapp_output.Prop}, SIZE = {len(tapp_output)} its')
+            if not self._sil:
+                logger.info(f'[{task_flag}] TAP2 BATCH INFERRED: PROP = {tapp_output.Prop}, SIZE = {len(tapp_output)} its')
         return tapp_output
