@@ -167,6 +167,11 @@ def _get_TA_mech_prop(Ti: float | None, H: float | None, B: float | None, C: flo
         tapp_input = TAPPInput(
             Prop='BTT',
             Ti=Ti if Ti is not None else 0,
+            H=H if H is not None else 0,
+            B=B if B is not None else 0,
+            C=C if C is not None else 0,
+            N=N if N is not None else 0,
+            O=O if O is not None else 0,
             Al=Al if Al is not None else 0,
             Si=Si if Si is not None else 0,
             Cr=Cr if Cr is not None else 0,
@@ -219,6 +224,7 @@ def _get_TA_mech_prop(Ti: float | None, H: float | None, B: float | None, C: flo
         _GS = HT_results[len(HT_param) - 1]['D']
         logger.info(f'HEAT TREATMENT: GS={_GS:f}')
     for prop_abbr in ["YS", "TS", "HD", "HP"]:
+        # noinspection PyTypeChecker
         tapp_input = TAPPInput(
             Prop=prop_abbr,
             Ti = Ti if Ti is not None else 0,

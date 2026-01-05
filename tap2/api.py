@@ -7,7 +7,7 @@ from tap2.core import TAPPInfer, TAPPInput, TAPPOutput, TAPPBatchInput, TAPPBatc
 _app = FastAPI(
     title="TAP2",
     description="Use TAP2 for property prediction of titanium alloy.",
-    version="0.0.8"
+    version="0.0.9"
 )
 
 _app.add_middleware(
@@ -25,7 +25,7 @@ _tapp_infer = TAPPInfer()
 async def root():
     return {
         "app": "TAPP",
-        "version": "0.0.8",
+        "version": "0.0.9",
         "author": "Hang Luo",
         "email": "haaaatcher@gmail.com",
         "description": "Use TAP2 for property prediction of titanium alloy."

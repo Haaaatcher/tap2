@@ -87,6 +87,7 @@ def run_gradio(host, port):
                                 mech_TD_TS = gr.Number(label="真实应变", value=0.8, interactive=True)
                                 mech_TD_SR = gr.Number(label="应变速率（1/s）", value=0.1, interactive=True)
                                 gr.Markdown('#### 热处理')
+                                # noinspection PyTypeChecker
                                 mech_HT_param = gr.Dataframe(
                                     value=[[900, 1], [400, 2]],
                                     headers=['温度（℃）', '时间（h）'],
