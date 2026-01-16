@@ -2,7 +2,7 @@ import uvicorn
 import click
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from tap2.core import TAPPInfer, TAPPInput, TAPPOutput, TAPPBatchInput, TAPPBatchOutput
+from tap2.core import TAP2Infer, TAP2Input, TAP2Output, TAP2BatchInput, TAP2BatchOutput
 
 _app = FastAPI(
     title="TAP2",
@@ -18,7 +18,7 @@ _app.add_middleware(
     allow_headers=["*"],
 )
 
-_tapp_infer = TAPPInfer()
+_tapp_infer = TAP2Infer()
 
 
 @_app.get("/")
@@ -33,7 +33,7 @@ async def root():
 
 
 @_app.post("/predict/ti_alloy/single")
-async def single_predict_ta(tapp_input: TAPPInput) -> TAPPOutput:
+async def single_predict_ta(tapp_input: TAP2Input) -> TAP2Output:
     """
     单点预测钛合金性能
     """
@@ -49,7 +49,7 @@ async def single_predict_ta(tapp_input: TAPPInput) -> TAPPOutput:
 
 
 @_app.post("/predict/ti_alloy/batch")
-async def batch_predict_ta(tapp_input: TAPPBatchInput) -> TAPPBatchOutput:
+async def batch_predict_ta(tapp_input: TAP2BatchInput) -> TAP2BatchOutput:
     """
     批量预测钛合金性能
     """

@@ -102,17 +102,17 @@ tapu --host 127.0.0.1 --port 8000
 - **单点预测**
 
 ```python
-from tap2 import TAPPInput, TAPPInfer
+from tap2 import TAP2Input, TAP2Infer
 
 # 创建 TAPP 推理器实例
-tapp_infer = TAPPInfer()
+tapp_infer = TAP2Infer()
 
 # 用字典定义单条输入数据
 data = {"Prop": "DS", "Ti": 90.0, "H": 0.0, "B": 0.0, "C": 0.0, "N": 0.0, "O": 0.0, "Al": 6.0, "Si": 0.0, "Cr": 0.0,
         "Fe": 0.0, "Ni": 0.0, "Cu": 0.0, "Zr": 0.0, "Nb": 0.0, "Mo": 0.0, "V": 4.0, "Sn": 0.0, "HTT": 800.0}
 
 # 创建 TAPP 单一输入实例
-data = TAPPInput(**data)
+data = TAP2Input(**data)
 
 # 调用 TAPP 进行推理
 result = tapp_infer(data).value
@@ -126,43 +126,43 @@ print(f"Density: {result :.3f} g/cm^3")
 - **批量预测**
 
 ```python
-from tap2 import TAPPBatchInput, TAPPInfer
+from tap2 import TAP2BatchInput, TAP2Infer
 
 # 创建TAPP推理器实例
-tapp_infer = TAPPInfer()
+tapp_infer = TAP2Infer()
 
 # 用字典定义多条输入数据，其中字典的值为列表
 data = {
-    "Prop": "DS",
-    "Ti": [90.0, 97.0],
-    "H": [0.0, 0.0],
-    "B": [0.0, 0.0],
-    "C": [0.0, 0.0],
-    "N": [0.0, 0.0],
-    "O": [0.0, 0.0],
-    "Al": [6.0, 3.0],
-    "Si": [0.0, 0.0],
-    "Cr": [0.0, 0.0],
-    "Fe": [0.0, 0.0],
-    "Ni": [0.0, 0.0],
-    "Cu": [0.0, 0.0],
-    "Zr": [0.0, 0.0],
-    "Nb": [0.0, 0.0],
-    "Mo": [0.0, 0.0],
-    "V": [4.0, 0.0],
-    "Sn": [0.0, 0.0],
-    "HTT": [800.0, 800.0]
+  "Prop": "DS",
+  "Ti": [90.0, 97.0],
+  "H": [0.0, 0.0],
+  "B": [0.0, 0.0],
+  "C": [0.0, 0.0],
+  "N": [0.0, 0.0],
+  "O": [0.0, 0.0],
+  "Al": [6.0, 3.0],
+  "Si": [0.0, 0.0],
+  "Cr": [0.0, 0.0],
+  "Fe": [0.0, 0.0],
+  "Ni": [0.0, 0.0],
+  "Cu": [0.0, 0.0],
+  "Zr": [0.0, 0.0],
+  "Nb": [0.0, 0.0],
+  "Mo": [0.0, 0.0],
+  "V": [4.0, 0.0],
+  "Sn": [0.0, 0.0],
+  "HTT": [800.0, 800.0]
 }
 
 # 创建 TAPP 批量输入实例
-data = TAPPBatchInput(**data)
+data = TAP2BatchInput(**data)
 
 # 调用 TAPP 进行推理
 results = tapp_infer(data).value
 
 # 打印浮点数结果
 for result in results:
-    print(f"Density: {result :.3f} g/cm^3")
+  print(f"Density: {result :.3f} g/cm^3")
 
 # Density: 4.457 g/cm^3
 # Density: 4.460 g/cm^3

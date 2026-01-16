@@ -1,4 +1,4 @@
-import torch
+from __future__ import annotations
 from hashlib import sha256
 from copy import deepcopy
 from art import text2art
@@ -11,6 +11,11 @@ from sparsemax import Sparsemax
 from loguru import logger
 from math import isclose, ceil
 from rich import print as rprint
+from rapidfuzz import process as RFP
+import torch
+import csv
+import ncn
+import json
 
 
 # 最大的批量大小，防止内存溢出
@@ -37,9 +42,9 @@ _DEFAULT_UNIT_MAP = {
 }
 
 
-class TAPPException(Exception):
+class TAP2Exception(Exception):
     """
-    TAPP 自定义异常类，用于处理 TAPP 相关的错误。
+    tap2 exception class to display tap2-related errors.
     """
     def __init__(self, message):
         super().__init__(message)
@@ -49,7 +54,7 @@ class TAPPException(Exception):
         return self.message
 
 
-class TAPPInput(BaseModel):
+class TAP2Input(BaseModel):
     """
     TAP2 单一输入的数据结构，包含钛合金的元素组成、热处理温度和晶粒尺寸等信息。
     """
@@ -82,7 +87,7 @@ class TAPPInput(BaseModel):
         """
         total = self.Ti + self.H + self.B + self.C + self.N + self.O + self.Al + self.Si + self.Cr + self.Fe + self.Ni + self.Cu + self.Zr + self.Nb + self.Mo + self.V + self.Sn
         if not isclose(total, 100, abs_tol=1e-6):
-            raise TAPPException(f"The sum of all element compositions must be 100, but got {total}.")
+            raise TAP2Exception(f"The sum of all element compositions must be 100, but got {total}.")
         return self
 
     @model_validator(mode="after")
@@ -92,7 +97,7 @@ class TAPPInput(BaseModel):
         :return: self
         """
         if self.Prop in ["WF", "TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC", "YS", "TS", "HD", "HP"] and self.HTT is None:
-            raise TAPPException("HTT is required for WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP")
+            raise TAP2Exception("HTT is required for WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP")
         return self
 
     @model_validator(mode="after")
@@ -102,7 +107,7 @@ class TAPPInput(BaseModel):
         :return: self
         """
         if self.Prop in ("YS", "TS", "HD", "HP") and self.GS is None:
-            raise TAPPException("GS is required for YS、TS、HD、HP.")
+            raise TAP2Exception("GS is required for YS、TS、HD、HP.")
         return self
 
     def __str__(self) -> str:
@@ -140,7 +145,7 @@ class TAPPInput(BaseModel):
         return sha256(str(self).encode("utf-8")).hexdigest()
 
 
-class TAPPBatchInput(BaseModel):
+class TAP2BatchInput(BaseModel):
     """
     TAP2 批量输入的数据结构，包含钛合金的元素组成、热处理温度和晶粒尺寸等信息的列表。
     """
@@ -174,7 +179,7 @@ class TAPPBatchInput(BaseModel):
         for idx in range(len(self)):
             total = self.Ti[idx] + self.H[idx] + self.B[idx] + self.C[idx] + self.N[idx] + self.O[idx] + self.Al[idx] + self.Si[idx] + self.Cr[idx] + self.Fe[idx] + self.Ni[idx] + self.Cu[idx] + self.Zr[idx] + self.Nb[idx] + self.Mo[idx] + self.V[idx] + self.Sn[idx]
             if not isclose(total, 100, abs_tol=1e-6):
-                raise TAPPException(f"The sum of all element compositions must be 100, but got {total} at index {idx}.")
+                raise TAP2Exception(f"The sum of all element compositions must be 100, but got {total} at index {idx}.")
         return self
 
     @model_validator(mode="after")
@@ -184,7 +189,7 @@ class TAPPBatchInput(BaseModel):
         :return: self
         """
         if self.Prop in ["WF", "TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC", "YS", "TS", "HD", "HP"] and self.HTT is None:
-            raise TAPPException("HTT is required for WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP")
+            raise TAP2Exception("HTT is required for WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP")
         return self
 
     @model_validator(mode="after")
@@ -194,7 +199,7 @@ class TAPPBatchInput(BaseModel):
         :return: self
         """
         if self.Prop in ("YS", "TS", "HD", "HP") and self.GS is None:
-            raise TAPPException("GS is required for YS、TS、HD、HP.")
+            raise TAP2Exception("GS is required for YS、TS、HD、HP.")
         return self
 
     def __len__(self) -> int:
@@ -245,7 +250,7 @@ class TAPPBatchInput(BaseModel):
         return sha256(str(self).encode("utf-8")).hexdigest()
 
 
-class TAPPPhaseRatio(BaseModel):
+class TAP2PhaseRatio(BaseModel):
     """
     TAP2 相比例的数据结构，包含钛合金各相的质量分数。
     """
@@ -270,7 +275,7 @@ class TAPPPhaseRatio(BaseModel):
         """
         total = self.ALPHA + self.BETA + self.LIQUID + self.LAVES + self.TI3AL + self.TI2CU + self.TI5SI3 + self.TIZRSI + self.TI2NI + self.TIM_B2 + self.C15_FCC + self.MC
         if not isclose(total, 100, abs_tol=1e-3):
-            raise TAPPException(f"The sum of all phase ratios must be 100, but got {total}.")
+            raise TAP2Exception(f"The sum of all phase ratios must be 100, but got {total}.")
         return self
 
     def __str__(self) -> str:
@@ -293,7 +298,7 @@ class TAPPPhaseRatio(BaseModel):
                f', MC={self.MC:f}'.rstrip('0').rstrip('.') + '}'
 
 
-class TAPPBatchPhaseRatio(BaseModel):
+class TAP2BatchPhaseRatio(BaseModel):
     """
     TAP2 批量相比例的数据结构，包含钛合金各相的质量分数列表。
     """
@@ -319,7 +324,7 @@ class TAPPBatchPhaseRatio(BaseModel):
         for idx in range(len(self)):
             total = self.ALPHA[idx] + self.BETA[idx] + self.LIQUID[idx] + self.LAVES[idx] + self.TI3AL[idx] + self.TI2CU[idx] + self.TI5SI3[idx] + self.TIZRSI[idx] + self.TI2NI[idx] + self.TIM_B2[idx] + self.C15_FCC[idx] + self.MC[idx]
             if not isclose(total, 100, abs_tol=1e-3):
-                raise TAPPException(f"The sum of all phase ratios must be 100, but got {total} at index {idx}.")
+                raise TAP2Exception(f"The sum of all phase ratios must be 100, but got {total} at index {idx}.")
         return self
 
     def __len__(self) -> int:
@@ -349,12 +354,12 @@ class TAPPBatchPhaseRatio(BaseModel):
                f', MC=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.MC[:size]])}]' + '}'
 
 
-class TAPPOutput(BaseModel):
+class TAP2Output(BaseModel):
     """
     TAP2 单一输出的数据结构，包含钛合金的性能代码、预测值及其单位。
     """
     Prop: Literal['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP'] = Field(..., description='钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、硬度（HD）、霍尔佩奇系数（HP）', examples=["DS", "WF"])
-    value: float | TAPPPhaseRatio = Field(..., description='TAP2 模型预测的钛合金性能值，除相比例（WF）外，全部为浮点数类型，相比例为 TAPPPhaseRatio 类型，包含各相的质量分数。', examples=[5, TAPPPhaseRatio(ALPHA=50, BETA=50)])
+    value: float | TAP2PhaseRatio = Field(..., description='TAP2 模型预测的钛合金性能值，除相比例（WF）外，全部为浮点数类型，相比例为 TAPPPhaseRatio 类型，包含各相的质量分数。', examples=[5, TAP2PhaseRatio(ALPHA=50, BETA=50)])
     unit: Optional[str] = Field(default=None, description='钛合金性能单位', examples=['g/cm^3', 'wt%'])
 
     @model_validator(mode="after")
@@ -364,11 +369,11 @@ class TAPPOutput(BaseModel):
         :return: self
         """
         if self.Prop == "WF":
-            if not isinstance(self.value, TAPPPhaseRatio):
-                raise TAPPException("For WF, value must be of type TAPPPhaseRatio.")
+            if not isinstance(self.value, TAP2PhaseRatio):
+                raise TAP2Exception("For WF, value must be of type TAPPPhaseRatio.")
         else:
             if not isinstance(self.value, float):
-                raise TAPPException(f"For {self.Prop}, value must be of type float.")
+                raise TAP2Exception(f"For {self.Prop}, value must be of type float.")
         return self
 
     @model_validator(mode='after')
@@ -394,12 +399,12 @@ class TAPPOutput(BaseModel):
         return output_str
 
 
-class TAPPBatchOutput(BaseModel):
+class TAP2BatchOutput(BaseModel):
     """
     TAP2 批量输出的数据结构，包含钛合金的性能代码、预测值列表及其单位。
     """
     Prop: Literal['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP'] = Field(..., description='钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、硬度（HD）、霍尔佩奇系数（HP）', examples=['DS', 'WF'])
-    value: List[float] | TAPPBatchPhaseRatio = Field(..., description='TAP2 模型预测的钛合金性能值列表，除相比例（WF）外，全部为浮点数列表类型，相比例为 TAPPBatchPhaseRatio 类型，包含各相的质量分数列表。', examples=[[5, 6], TAPPBatchPhaseRatio(ALPHA=[100, 0], BETA=[0, 100])])
+    value: List[float] | TAP2BatchPhaseRatio = Field(..., description='TAP2 模型预测的钛合金性能值列表，除相比例（WF）外，全部为浮点数列表类型，相比例为 TAPPBatchPhaseRatio 类型，包含各相的质量分数列表。', examples=[[5, 6], TAP2BatchPhaseRatio(ALPHA=[100, 0], BETA=[0, 100])])
     unit: Optional[str] = Field(default=None, description='钛合金性能单位', examples=['g/cm^3', 'wt%'])
 
     @model_validator(mode="after")
@@ -409,13 +414,13 @@ class TAPPBatchOutput(BaseModel):
         :return: self
         """
         if self.Prop == "WF":
-            if not isinstance(self.value, TAPPBatchPhaseRatio):
-                raise TAPPException("For WF, value must be of type TAPPBatchPhaseRatio.")
+            if not isinstance(self.value, TAP2BatchPhaseRatio):
+                raise TAP2Exception("For WF, value must be of type TAPPBatchPhaseRatio.")
         else:
             if not isinstance(self.value, List):
-                raise TAPPException(f"For {self.Prop}, value must be of type List[float].")
+                raise TAP2Exception(f"For {self.Prop}, value must be of type List[float].")
             if not all(isinstance(v, float) for v in self.value):
-                raise TAPPException(f"For {self.Prop}, all items in value must be of type float.")
+                raise TAP2Exception(f"For {self.Prop}, all items in value must be of type float.")
         return self
 
     @model_validator(mode='after')
@@ -448,7 +453,7 @@ class TAPPBatchOutput(BaseModel):
         return len(self.value)
 
 
-class TAPPInfer:
+class TAP2Infer:
 
     _prop_abbrs = ['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP']
 
@@ -486,7 +491,7 @@ class TAPPInfer:
         self._skp = skip_correction
         self._dev = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
         if not 0 < batch_size < _MAX_BATCH_SIZE:
-            raise TAPPException('Batch size must be between 1 and 10,000.')
+            raise TAP2Exception('Batch size must be between 1 and 10,000.')
         self._bs = batch_size
         print(text2art('TAP2'), end='')
         print(f'Device: {self._dev}')
@@ -519,7 +524,7 @@ class TAPPInfer:
         else:
             return task_flag
 
-    def _infer(self, tapp_input: TAPPInput) -> float | List[float]:
+    def _infer(self, tapp_input: TAP2Input) -> float | List[float]:
         """
         调用 TAP2 模型进行单点推理，获取预测性能。
         :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（单一输入）。
@@ -553,7 +558,7 @@ class TAPPInfer:
                 output = output_T.item()
         return output
 
-    def _batch_infer(self, tapp_input: TAPPBatchInput) -> List[float] | List[List[float]]:
+    def _batch_infer(self, tapp_input: TAP2BatchInput) -> List[float] | List[List[float]]:
         """
         调用 TAP2 模型进行批量推理，获取预测性能。
         :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（批量输入）。
@@ -603,7 +608,7 @@ class TAPPInfer:
                     outputs.extend(batch_outputs)
         return outputs
 
-    def _corr(self, tapp_input: TAPPInput, orig_output: float | List[float]) -> float | List[float]:
+    def _corr(self, tapp_input: TAP2Input, orig_output: float | List[float]) -> float | List[float]:
         """
         利用经验公式对 TAP2 模型的预测结果进行修正。
         :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（单一输入）。
@@ -657,7 +662,7 @@ class TAPPInfer:
             correct += increment
         return correct
 
-    def _batch_corr(self, tapp_input: TAPPBatchInput, orig_output: List[float] | List[List[float]]) -> List[float] | List[List[float]]:
+    def _batch_corr(self, tapp_input: TAP2BatchInput, orig_output: List[float] | List[List[float]]) -> List[float] | List[List[float]]:
         """
         利用经验公式对 TAP2 模型的预测结果进行修正。
         :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（批量输入）。
@@ -747,25 +752,25 @@ class TAPPInfer:
                 corrects[idx] += increment
         return corrects
 
-    def __call__(self, tapp_input: TAPPInput | TAPPBatchInput) -> TAPPOutput | TAPPBatchOutput:
+    def __call__(self, tapp_input: TAP2Input | TAP2BatchInput) -> TAP2Output | TAP2BatchOutput:
         """
         调用 TAP2 模型进行推理，预测钛合金的性能，支持批量处理。
         :param tapp_input: 包括待预测性能名称、钛合金的元素组成、热处理温度和晶粒尺寸（单一输入或批量输入）
         :return: TAP2 预测的性能值（单一输出或批量输出）
         """
         task_flag = self._short_task_flag(tapp_input.sha256)
-        if isinstance(tapp_input, TAPPInput):
+        if isinstance(tapp_input, TAP2Input):
             logger.info(f'[{task_flag}] TAP2 INFERRING: INPUT = {tapp_input}')
             infer_func = self._infer
             corr_func = self._corr
-            output_type = TAPPOutput
-            phase_ratio_type = TAPPPhaseRatio
+            output_type = TAP2Output
+            phase_ratio_type = TAP2PhaseRatio
         else:
             logger.info(f'[{task_flag}] TAP2 BATCH INFERRING: PROP = {tapp_input.Prop}, SIZE = {len(tapp_input)} its')
             infer_func = self._batch_infer
             corr_func = self._batch_corr
-            output_type = TAPPBatchOutput
-            phase_ratio_type = TAPPBatchPhaseRatio
+            output_type = TAP2BatchOutput
+            phase_ratio_type = TAP2BatchPhaseRatio
         output_value = infer_func(tapp_input)
         if not self._skp:
             output_value = corr_func(tapp_input, output_value)
@@ -786,8 +791,96 @@ class TAPPInfer:
             ))
         else:
             tapp_output = output_type(Prop=tapp_input.Prop, value=output_value)
-        if isinstance(tapp_output, TAPPOutput):
+        if isinstance(tapp_output, TAP2Output):
             logger.info(f'[{task_flag}] TAP2 INFERRED: OUTPUT = {tapp_output}')
         else:
             logger.info(f'[{task_flag}] TAP2 BATCH INFERRED: PROP = {tapp_output.Prop}, SIZE = {len(tapp_output)} its')
         return tapp_output
+
+
+class TAP2Database:
+    """
+    TAP2 database management class that supports loading data from CSV files and
+    selecting properties based on composition and process.
+    """
+    _SCORE_CUTOFF_ = 95
+    _MAX_DB_SIZE_ = 100000
+
+    def __init__(self):
+        """
+        Initialize the TAP2Database.
+        """
+        self.data: list[dict] = []
+        self.ncn_index: dict[str, list] = {}
+
+    def select(self, composition: dict, process: str) -> dict | None:
+        """
+        Select properties from the database based on composition and process.
+        If it hits, it returns a dictionary result, and if it misses, it returns None.
+        :param composition: Element composition as a dictionary.
+        :param process: Processing method as a string.
+        :return: Dictionary of properties if hit, None if miss.
+        """
+        key = ncn.name(**composition)
+        if key in self.ncn_index:
+            cand_process_texts = [self.data[_]['process'] for _ in self.ncn_index[key]]
+            extract_result = RFP.extractOne(process, cand_process_texts, score_cutoff=90)
+            if extract_result:
+                match_data = self.data[self.ncn_index[key][extract_result[2]]]
+                return match_data['properties']
+            else:
+                return None
+        else:
+            return None
+
+    def load_csv(self, csv_path: Path) -> int:
+        """
+        Load data from a CSV file.
+        The total amount of data does not exceed _MAX_DB_SIZE_.
+        Returns the number of successfully loaded data pieces.
+        :param csv_path: Path to the CSV file.
+        :return: Number of successfully loaded data pieces.
+        """
+        count = len(self.data)
+        with open(csv_path, 'r', encoding='utf-8', newline='') as csv_file:
+            csv_reader = csv.DictReader(csv_file, fieldnames=['composition', 'process', 'properties'], restkey='_trash_')
+            for row in csv_reader:
+                if len(self.data) < self._MAX_DB_SIZE_:
+                    row.pop('_trash_', None)
+                    row['composition'] = ncn.parse(row['composition'], balance=True)
+                    key = ncn.name(**row['composition'])
+                    row['properties'] = json.loads(row['properties'])
+                    self.data.append(row)
+                    if key in self.ncn_index:
+                        self.ncn_index[key].append(len(self.data) - 1)
+                    else:
+                        self.ncn_index[key] = [len(self.data) - 1]
+                else:
+                    break
+        return len(self.data) - count
+
+    def append(self, composition: dict, process: str, properties: dict) -> bool:
+        """
+        Append a new data entry to the database.
+        The total amount of data does not exceed _MAX_DB_SIZE_.
+        Returns True if the data is successfully appended, False otherwise.
+        :param composition: Element composition as a dictionary.
+        :param process: Processing method as a string.
+        :param properties: Properties as a dictionary.
+        :return: True if successfully appended, False otherwise.
+        """
+        if len(self.data) < self._MAX_DB_SIZE_:
+            key = ncn.name(**composition)
+            new_entry = {
+                'composition': deepcopy(composition),
+                'process': process,
+                'properties': deepcopy(properties)
+            }
+            self.data.append(new_entry)
+            if key in self.ncn_index:
+                self.ncn_index[key].append(len(self.data) - 1)
+            else:
+                self.ncn_index[key] = [len(self.data) - 1]
+            return True
+        else:
+            return False

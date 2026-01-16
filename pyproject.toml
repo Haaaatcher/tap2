@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tap2"
-version = "0.0.9"
+version = "0.1.0"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -41,7 +41,9 @@ dependencies = [
     "scipy>=1.15.3",
     "catboost>=1.2.8",
     "scikit-learn>=1.7.2",
-    "rich>=14.2.0"
+    "rich>=14.2.0",
+    "rapidfuzz>=3.14.3",
+    "ncn>=0.0.4"
 ]
 
 [project.scripts]

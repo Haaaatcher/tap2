@@ -8,7 +8,7 @@ from typing import Dict, List
 from gradio.utils import NamedString
 from tempfile import NamedTemporaryFile
 from pandas import DataFrame, to_numeric
-from tap2.core import TAPPInput, TAPPInfer, _MAX_BATCH_SIZE, TAPPBatchInput
+from tap2.core import TAP2Input, TAP2Infer, _MAX_BATCH_SIZE, TAP2BatchInput
 from loguru import logger
 from thermal_deformation import predict_grain_size as TD_pred_GS
 from heat_treatment import predict_grain_size as HT_pred_GS, model as HT_model, feats as HT_feats
@@ -16,7 +16,7 @@ from math import isclose
 
 
 
-_TAPP_INFER = TAPPInfer()
+_TAPP_INFER = TAP2Infer()
 
 _PROP_ZH2ABBR_MAP = {
     "热膨胀系数": "TE",
@@ -83,7 +83,7 @@ def _get_TA_phys_prop(Ti: float | None, H: float | None, B: float | None, C: flo
     prop_values = []
     for prop_abbr in ["TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC"]:
         # noinspection PyTypeChecker
-        tapp_input = TAPPInput(
+        tapp_input = TAP2Input(
             Prop=prop_abbr,
             Ti = Ti if Ti is not None else 0,
             H = H if H is not None else 0,
@@ -164,7 +164,7 @@ def _get_TA_mech_prop(Ti: float | None, H: float | None, B: float | None, C: flo
             if elem_conc is not None and abs(elem_conc) > 1e-6:
                 comp_sub_strs.append(f"{elem_conc:f}".rstrip("0").rstrip(".") + elem_name)
         comp_str = "-".join(comp_sub_strs)
-        tapp_input = TAPPInput(
+        tapp_input = TAP2Input(
             Prop='BTT',
             Ti=Ti if Ti is not None else 0,
             H=H if H is not None else 0,
@@ -225,7 +225,7 @@ def _get_TA_mech_prop(Ti: float | None, H: float | None, B: float | None, C: flo
         logger.info(f'HEAT TREATMENT: GS={_GS:f}')
     for prop_abbr in ["YS", "TS", "HD", "HP"]:
         # noinspection PyTypeChecker
-        tapp_input = TAPPInput(
+        tapp_input = TAP2Input(
             Prop=prop_abbr,
             Ti = Ti if Ti is not None else 0,
             H = H if H is not None else 0,
@@ -443,7 +443,7 @@ def _batch_get_TA_prop(prop_names: List[str], input_files: List[NamedString] | N
             continue
         outputs_col = []
         for prop_abbr in prop_abbrs:
-            tapp_input = TAPPBatchInput(Prop=prop_abbr, **dict_input)
+            tapp_input = TAP2BatchInput(Prop=prop_abbr, **dict_input)
             tapp_output = _TAPP_INFER(tapp_input)
             # 单位修正
             if prop_abbr == "TE":
@@ -482,7 +482,7 @@ def _get_TA_WF(Ti: float | None, Al: float | None, Si: float | None, Cr: float |
     if not _valid_comp(Ti, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
         gr.Warning("请输入正确的成分！")
         return [None] * 12
-    tapp_input = TAPPInput(
+    tapp_input = TAP2Input(
         Prop='WF',
         Ti=Ti if Ti is not None else 0,
         Al=Al if Al is not None else 0,
@@ -518,7 +518,7 @@ def _get_TA_BTT(Ti: float | None, Al: float | None, Si: float | None, Cr: float 
     if not _valid_comp(Ti, Al, Si, Cr, Fe, Ni, Cu, Zr, Nb, Mo, V, Sn):
         gr.Warning("请输入正确的成分！")
         return None
-    tapp_input = TAPPInput(
+    tapp_input = TAP2Input(
         Prop='BTT',
         Ti=Ti if Ti is not None else 0,
         Al=Al if Al is not None else 0,

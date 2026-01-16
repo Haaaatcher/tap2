@@ -1,12 +1,12 @@
 import sys
 from .model import MoE2
-from .core import TAPPInfer, TAPPException, TAPPInput, TAPPOutput, TAPPBatchInput, TAPPBatchOutput
+from .core import TAP2Infer, TAP2Exception, TAP2Input, TAP2Output, TAP2BatchInput, TAP2BatchOutput
 from loguru import logger
 from pathlib import Path
 
 
 
-__version__ = "0.0.9"
+__version__ = "0.1.0"
 
 __author__ = "Hang Luo"
 
@@ -14,12 +14,12 @@ __email__ = "haaaatcher@gmail.com"
 
 __all__ = [
     "MoE2",
-    "TAPPInfer",
-    "TAPPException",
-    "TAPPInput",
-    "TAPPOutput",
-    "TAPPBatchInput",
-    "TAPPBatchOutput"
+    "TAP2Infer",
+    "TAP2Exception",
+    "TAP2Input",
+    "TAP2Output",
+    "TAP2BatchInput",
+    "TAP2BatchOutput"
 ]
 
 _log_format = "<green>[{time:YYYY-MM-DD HH:mm:ss}]</green> " \
