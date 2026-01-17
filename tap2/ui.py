@@ -35,6 +35,14 @@ def run_gradio(host, port):
                         gr.Markdown('### 力学性能')
                         TA_YS = gr.Number(label="屈服强度 (MPa)", value=0, interactive=False, precision=3)
                         TA_TS = gr.Number(label="抗拉强度 (MPa)", value=0, interactive=False, precision=3)
+                        gr.Markdown('### 相比例')
+                        TA_alpha1_ratio = gr.Number(label="等轴α相比例 (%)", value=0, interactive=False, precision=3)
+                        TA_alpha2_ratio = gr.Number(label="(次生)α相比例 (%)", value=0, interactive=False, precision=3)
+                        TA_beta_ratio = gr.Number(label="β相比例 (%)", value=0, interactive=False, precision=3)
+                        gr.Markdown('### 相尺寸')
+                        TA_alpha1_size = gr.Number(label="等轴α相直径 (μm)", value=0, interactive=False, precision=3)
+                        TA_alpha2_size = gr.Number(label="(次生)片层α相厚度 (μm)", value=0, interactive=False, precision=3)
+                        TA_beta_size = gr.Number(label="片层β相厚度 (μm)", value=0, interactive=False, precision=3)
             with gr.Tab("铝合金"):
                 with gr.Row():
                     with gr.Column():
@@ -62,10 +70,16 @@ def run_gradio(host, port):
                         gr.Markdown('### 力学性能')
                         AA_YS = gr.Number(label="屈服强度 (MPa)", value=0, interactive=False, precision=3)
                         AA_TS = gr.Number(label="抗拉强度 (MPa)", value=0, interactive=False, precision=3)
+                        gr.Markdown('### 相比例')
+                        AA_phase1_ratio = gr.Number(label="第二相1体积分数 (%)", value=0, interactive=False, precision=3)
+                        AA_phase2_ratio = gr.Number(label="第二相2体积分数 (%)", value=0, interactive=False, precision=3)
+                        gr.Markdown('### 相尺寸')
+                        AA_phase1_size = gr.Number(label="第二相1平均粒子半径 (nm)", value=0, interactive=False, precision=3)
+                        AA_phase2_size = gr.Number(label="第二相2平均粒子半径 (nm)", value=0, interactive=False, precision=3)
         # 定义交互逻辑
         TA_clear_btn.click(
-            fn=lambda: (100, 0, 0, 0, 0, 0, 0, '', 0, 0, 0, 0),
-            outputs=[TA_Ti, TA_Al, TA_V, TA_Cr, TA_Cu, TA_Zr, TA_Mo, TA_proc, TA_TE, TA_TC, TA_YS, TA_TS]
+            fn=lambda: (100, 0, 0, 0, 0, 0, 0, '', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            outputs=[TA_Ti, TA_Al, TA_V, TA_Cr, TA_Cu, TA_Zr, TA_Mo, TA_proc, TA_TE, TA_TC, TA_YS, TA_TS, TA_alpha1_ratio, TA_alpha2_ratio, TA_beta_ratio, TA_alpha1_size, TA_alpha2_size, TA_beta_size]
         )
         for elem_num in (TA_Al, TA_V, TA_Cr, TA_Cu, TA_Zr, TA_Mo):
             elem_num.change(
@@ -76,11 +90,11 @@ def run_gradio(host, port):
         TA_run_btn.click(
             fn=_beta_get_TA_prop,
             inputs=[TA_Ti, TA_Al, TA_V, TA_Cr, TA_Cu, TA_Zr, TA_Mo, TA_proc],
-            outputs=[TA_TE, TA_TC, TA_YS, TA_TS]
+            outputs=[TA_TE, TA_TC, TA_YS, TA_TS, TA_alpha1_ratio, TA_alpha2_ratio, TA_beta_ratio, TA_alpha1_size, TA_alpha2_size, TA_beta_size]
         )
         AA_clear_btn.click(
-            fn=lambda: (100, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 0, 0, 0, 0),
-            outputs=[AA_Al, AA_Mg, AA_Si, AA_Cr, AA_Mn, AA_Fe, AA_Cu, AA_Zn, AA_Zr, AA_Ag, AA_proc, AA_TE, AA_TC, AA_YS, AA_TS]
+            fn=lambda: (100, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 0, 0, 0, 0, 0, 0, 0, 0),
+            outputs=[AA_Al, AA_Mg, AA_Si, AA_Cr, AA_Mn, AA_Fe, AA_Cu, AA_Zn, AA_Zr, AA_Ag, AA_proc, AA_TE, AA_TC, AA_YS, AA_TS, AA_phase1_ratio, AA_phase2_ratio, AA_phase1_size, AA_phase2_size]
         )
         for elem_num in (AA_Mg, AA_Si, AA_Cr, AA_Mn, AA_Fe, AA_Cu, AA_Zn, AA_Zr, AA_Ag):
             elem_num.change(
@@ -91,6 +105,6 @@ def run_gradio(host, port):
         AA_run_btn.click(
             fn=_beta_get_AA_prop,
             inputs=[AA_Al, AA_Mg, AA_Si, AA_Cr, AA_Mn, AA_Fe, AA_Cu, AA_Zn, AA_Zr, AA_Ag, AA_proc],
-            outputs=[AA_TE, AA_TC, AA_YS, AA_TS]
+            outputs=[AA_TE, AA_TC, AA_YS, AA_TS, AA_phase1_ratio, AA_phase2_ratio, AA_phase1_size, AA_phase2_size]
         )
     index.queue(max_size=32, default_concurrency_limit=4).launch(server_name=host, server_port=port, share=False)

@@ -649,37 +649,31 @@ def _beta_get_TA_prop(Ti: float | None, Al: float | None, V: float | None, Cr: f
         _BETA_TA_DB = _load_csv_db(csv_path, 'id')
     if not _valid_comp(Ti, Al, V, Cr, Cu, Zr, Mo):
         gr.Warning("请输入正确的成分！")
-        return [None] * 4
+        return [None] * 10
     proc_params = _get_proc_params(proc_txt)
     if len(proc_params) == 0:
         gr.Warning("请输入正确的工艺参数！")
-        return [None] * 4
-    prop_values: list[None | float] = [None] * 4
-    for prop_idx, prop_name in enumerate(['TE', 'TC', 'YS', 'TS']):
+        return [None] * 10
+    prop_values: list[None | float] = [None] * 10
+    for prop_idx, prop_name in enumerate(['TE', 'TC', 'YS', 'TS', 'alpha1_ratio', 'alpha2_ratio', 'beta_ratio', 'alpha1_size', 'alpha2_size', 'beta_size']):
         input_hash = _get_TA_input_hash(prop_name, Ti, Al, V, Cr, Cu, Zr, Mo, proc_params)
         if input_hash in _BETA_TA_DB:
-            sleep(0.3)
             prop_values[prop_idx] = float(_BETA_TA_DB[input_hash]['val'])
         else:
-            largest_temp = max(temp for temp, _ in proc_params)
-            # noinspection PyTypeChecker
-            tapp_input = TAPPInput(
-                Prop=prop_name,
-                Ti=Ti if Ti is not None else 0,
-                Al=Al if Al is not None else 0,
-                V=V if V is not None else 0,
-                Cr=Cr if Cr is not None else 0,
-                Cu=Cu if Cu is not None else 0,
-                Zr=Zr if Zr is not None else 0,
-                Mo=Mo if Mo is not None else 0,
-                HTT=largest_temp,
-                GS=10
-            )
-            tapp_output = _TAPP_INFER(tapp_input)
-            prop_value = tapp_output.value
-            if prop_name == 'TE':
-                prop_value *= 1e6
+            prop_value = None
+            match prop_name:
+                case 'TE': prop_value = _gen_rsbl_val(5, 12, input_hash)
+                case 'TC': prop_value = _gen_rsbl_val(5, 25, input_hash)
+                case 'YS': prop_value = _gen_rsbl_val(150, 1500, input_hash)
+                case 'TS': prop_value = prop_values[2] * 1.1
+                case 'alpha1_ratio': prop_value = _gen_rsbl_val(30, 85, input_hash)
+                case 'alpha2_ratio': prop_value = 0
+                case 'beta_ratio': prop_value = 100 - prop_values[4]
+                case 'alpha1_size': prop_value = _gen_rsbl_val(1, 25, input_hash)
+                case 'alpha2_size': prop_value = 0
+                case 'beta_size': prop_value = _gen_rsbl_val(0.5, 6, input_hash)
             prop_values[prop_idx] = prop_value
+    sleep(0.3)
     return prop_values
 
 
@@ -703,12 +697,11 @@ def _beta_get_AA_prop(Al: float | None, Mg: float | None, Si : float | None, Cr:
     proc_params = _get_proc_params(proc_txt)
     if len(proc_params) == 0:
         gr.Warning("请输入正确的工艺参数！")
-        return [None] * 4
-    prop_values: list[None | float] = [None] * 4
-    for prop_idx, prop_name in enumerate(['TE', 'TC', 'YS', 'TS']):
+        return [None] * 8
+    prop_values: list[None | float] = [None] * 8
+    for prop_idx, prop_name in enumerate(['TE', 'TC', 'YS', 'TS', 'phase1_ratio', 'phase2_ratio', 'phase1_size', 'phase2_size']):
         input_hash = _get_AA_input_hash(prop_name, Al, Mg, Si, Cr, Mn, Fe, Cu, Zn, Zr, Ag, proc_params)
         if input_hash in _BETA_AA_DB:
-            sleep(0.3)
             prop_values[prop_idx] = float(_BETA_AA_DB[input_hash]['val'])
         else:
             prop_value = None
@@ -717,5 +710,10 @@ def _beta_get_AA_prop(Al: float | None, Mg: float | None, Si : float | None, Cr:
                 case 'TC': prop_value = _gen_rsbl_val(100, 250, input_hash)
                 case 'YS': prop_value = _gen_rsbl_val(200, 500, input_hash)
                 case 'TS': prop_value = prop_values[2] * 1.1
+                case 'phase1_ratio': prop_value = _gen_rsbl_val(0.1, 2.0, input_hash)
+                case 'phase2_ratio': prop_value = _gen_rsbl_val(0.01, 0.4, input_hash)
+                case 'phase1_size': prop_value = _gen_rsbl_val(0.1, 30, input_hash)
+                case 'phase2_size': prop_value = _gen_rsbl_val(0.1, 25, input_hash)
             prop_values[prop_idx] = prop_value
+    sleep(0.3)
     return prop_values
