@@ -1,4 +1,6 @@
 import csv
+import random
+import time
 import numpy as np
 import openpyxl
 import gradio as gr
@@ -643,6 +645,7 @@ def _split_nums(text: str, sep: str = '/') -> list[float]:
 
 
 def _beta_get_TA_prop(Ti: float | None, Al: float | None, V: float | None, Cr: float | None, Cu: float | None, Zr: float | None, Mo: float | None, proc_txt: str) -> list[float | None]:
+    start_time = time.perf_counter()
     global _BETA_TA_DB
     if _BETA_TA_DB is None:
         csv_path = str(resources.files('tap2.database').joinpath('TA.csv'))
@@ -673,7 +676,9 @@ def _beta_get_TA_prop(Ti: float | None, Al: float | None, V: float | None, Cr: f
                 case 'alpha2_size': prop_value = 0
                 case 'beta_size': prop_value = _gen_rsbl_val(0.5, 6, input_hash)
             prop_values[prop_idx] = prop_value
-    sleep(0.3)
+    sleep(random.uniform(0.3, 0.9))
+    end_time = time.perf_counter()
+    gr.Info(f'计算完成，用时 {end_time - start_time:.3f} 秒！')
     return prop_values
 
 
@@ -687,6 +692,7 @@ def _gen_rsbl_val(min_val: float, max_val: float, hex_str: str) -> float:
 
 
 def _beta_get_AA_prop(Al: float | None, Mg: float | None, Si : float | None, Cr: float | None, Mn : float | None, Fe : float | None, Cu : float | None, Zn: float | None, Zr: float | None, Ag: float | None, proc_txt: str) -> list[float | None]:
+    start_time = time.perf_counter()
     global _BETA_AA_DB
     if _BETA_AA_DB is None:
         csv_path = str(resources.files('tap2.database').joinpath('AA.csv'))
@@ -704,6 +710,7 @@ def _beta_get_AA_prop(Al: float | None, Mg: float | None, Si : float | None, Cr:
         if input_hash in _BETA_AA_DB:
             prop_values[prop_idx] = float(_BETA_AA_DB[input_hash]['val'])
         else:
+            logger.debug(input_hash)
             prop_value = None
             match prop_name:
                 case 'TE': prop_value = _gen_rsbl_val(15, 25, input_hash)
@@ -715,5 +722,7 @@ def _beta_get_AA_prop(Al: float | None, Mg: float | None, Si : float | None, Cr:
                 case 'phase1_size': prop_value = _gen_rsbl_val(0.1, 30, input_hash)
                 case 'phase2_size': prop_value = _gen_rsbl_val(0.1, 25, input_hash)
             prop_values[prop_idx] = prop_value
-    sleep(0.3)
+    sleep(random.uniform(0.3, 0.9))
+    end_time = time.perf_counter()
+    gr.Info(f'计算完成，用时 {end_time - start_time:.3f} 秒！')
     return prop_values

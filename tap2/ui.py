@@ -30,7 +30,7 @@ def run_gradio(host, port):
                             TA_run_btn = gr.Button("提交", interactive=True)
                     with gr.Column():
                         gr.Markdown('### 物理性能')
-                        TA_TE = gr.Number(label="热膨胀系数 (10^-6/K)", value=0, interactive=False, precision=3)
+                        TA_TE = gr.Number(label="热膨胀系数 (10^-6/℃)", value=0, interactive=False, precision=3)
                         TA_TC = gr.Number(label="热导率 (W/m·K)", value=0, interactive=False, precision=3)
                         gr.Markdown('### 力学性能')
                         TA_YS = gr.Number(label="屈服强度 (MPa)", value=0, interactive=False, precision=3)
@@ -65,7 +65,7 @@ def run_gradio(host, port):
                             AA_run_btn = gr.Button("提交", interactive=True)
                     with gr.Column():
                         gr.Markdown('### 物理性能')
-                        AA_TE = gr.Number(label="热膨胀系数 (10^-6/K)", value=0, interactive=False, precision=3)
+                        AA_TE = gr.Number(label="热膨胀系数 (10^-6/℃)", value=0, interactive=False, precision=3)
                         AA_TC = gr.Number(label="热导率 (W/m·K)", value=0, interactive=False, precision=3)
                         gr.Markdown('### 力学性能')
                         AA_YS = gr.Number(label="屈服强度 (MPa)", value=0, interactive=False, precision=3)
