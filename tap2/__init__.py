@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 
-__version__ = "0.0.8b9"
+__version__ = "0.0.8b10"
 
 __author__ = "Hang Luo"
 
