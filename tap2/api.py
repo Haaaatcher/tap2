@@ -2,12 +2,12 @@ import uvicorn
 import click
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from tap2.core import TAP2Infer, TAP2Input, TAP2Output, TAP2BatchInput, TAP2BatchOutput
+from tap2.core import TAInfer, TAInput, TAOutput, TABatchInput, TABatchOutput, TAPropAbbr
 
 _app = FastAPI(
     title="TAP2",
     description="Use TAP2 for property prediction of titanium alloy.",
-    version="0.0.9"
+    version="0.1.0"
 )
 
 _app.add_middleware(
@@ -18,14 +18,14 @@ _app.add_middleware(
     allow_headers=["*"],
 )
 
-_tapp_infer = TAP2Infer()
+_ta_infer_ = TAInfer()
 
 
 @_app.get("/")
 async def root():
     return {
-        "app": "TAPP",
-        "version": "0.0.9",
+        "app": "TAP2",
+        "version": "0.1.0",
         "author": "Hang Luo",
         "email": "haaaatcher@gmail.com",
         "description": "Use TAP2 for property prediction of titanium alloy."
@@ -33,37 +33,37 @@ async def root():
 
 
 @_app.post("/predict/ti_alloy/single")
-async def single_predict_ta(tapp_input: TAP2Input) -> TAP2Output:
+async def single_predict_ta(ta_input: TAInput) -> TAOutput:
     """
-    单点预测钛合金性能
+    Predict titanium properties (Single)
     """
-    tapp_output = _tapp_infer(tapp_input)
-    # 单位修正
-    if tapp_input.Prop == "TE":
-        tapp_output.value *= 1e6
-        tapp_output.unit = "10^-6/K"
-    elif tapp_input.Prop == "EC":
-        tapp_output.value *= 1e-6
-        tapp_output.unit = "10^6 S/m"
-    return tapp_output
+    ta_output = _ta_infer_(ta_input)
+    # Unit correction
+    if ta_input.prop is TAPropAbbr.TE:
+        ta_output.value *= 1e6
+        ta_output.unit = "10^-6/K"
+    elif ta_input.prop is TAPropAbbr.EC:
+        ta_output.value *= 1e-6
+        ta_output.unit = "10^6 S/m"
+    return ta_output
 
 
 @_app.post("/predict/ti_alloy/batch")
-async def batch_predict_ta(tapp_input: TAP2BatchInput) -> TAP2BatchOutput:
+async def batch_predict_ta(ta_input: TABatchInput) -> TABatchOutput:
     """
-    批量预测钛合金性能
+    Predict titanium properties (Batch)
     """
-    tapp_output = _tapp_infer(tapp_input)
+    ta_output = _ta_infer_(ta_input)
     # 单位修正
-    if tapp_input.Prop == "TE":
-        for idx in range(len(tapp_output)):
-            tapp_output.value[idx] *= 1e6
-        tapp_output.unit = "10^-6/K"
-    elif tapp_input.Prop == "EC":
-        for idx in range(len(tapp_output)):
-            tapp_output.value[idx] *= 1e-6
-        tapp_output.unit = "10^6 S/m"
-    return tapp_output
+    if ta_input.prop is TAPropAbbr.TE:
+        for idx in range(len(ta_output)):
+            ta_output.value[idx] *= 1e6
+        ta_output.unit = "10^-6/K"
+    elif ta_input.prop is TAPropAbbr.EC:
+        for idx in range(len(ta_output)):
+            ta_output.value[idx] *= 1e-6
+        ta_output.unit = "10^6 S/m"
+    return ta_output
 
 
 @click.command()

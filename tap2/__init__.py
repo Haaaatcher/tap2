@@ -1,6 +1,6 @@
 import sys
-from .model import MoE2
-from .core import TAP2Infer, TAP2Exception, TAP2Input, TAP2Output, TAP2BatchInput, TAP2BatchOutput
+from .model import MoE2, AAModel
+from .core import TAInfer, TAInput, TAOutput, TABatchInput, TABatchOutput, AAInfer, AAInput, AAOutput
 from loguru import logger
 from pathlib import Path
 
@@ -14,27 +14,30 @@ __email__ = "haaaatcher@gmail.com"
 
 __all__ = [
     "MoE2",
-    "TAP2Infer",
-    "TAP2Exception",
-    "TAP2Input",
-    "TAP2Output",
-    "TAP2BatchInput",
-    "TAP2BatchOutput"
+    "AAModel",
+    "TAInfer",
+    "TAInput",
+    "TAOutput",
+    "TABatchInput",
+    "TABatchOutput",
+    "AAInput",
+    "AAOutput",
+    "AAInfer"
 ]
 
-_log_format = "<green>[{time:YYYY-MM-DD HH:mm:ss}]</green> " \
-              "<level>[{level}]</level> " \
-              "<cyan>[{name}:{function}:{line}]</cyan> " \
-              "<level>{message}</level>"
+_log_format_ = "<green>[{time:YYYY-MM-DD HH:mm:ss}]</green> " \
+               "<level>[{level}]</level> " \
+               "<cyan>[{name}:{function}:{line}]</cyan> " \
+               "<level>{message}</level>"
 
 logger.remove()
 
-logger.add(sys.stderr, format=_log_format)
+logger.add(sys.stderr, format=_log_format_)
 
 logger.add(
     Path.home() / "logs" / "tap2.log",
     level="INFO",
-    format=_log_format,
+    format=_log_format_,
     rotation="500 MB",
     retention=10,
     compression="zip",

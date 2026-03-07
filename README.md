@@ -1,4 +1,4 @@
-# **TAP2** *v0.0.8*
+# **TAP2** *v0.1.0*
 
 ## 一、用户指南
 
@@ -9,7 +9,7 @@
 ```bash
 # conda create -n tap2 python=3.10
 # conda activate tap2
-pip install ./tap2-0.08-py3-none-any.whl
+pip install ./tap2-0.1.0-py3-none-any.whl
 ```
 
 在本地开启 `tap2` 的用户界面需在终端中启动 `tapu`（含义是：`TAP2's UI`）命令，输出如下信息则表示开启成功，在浏览器中进入[输出的 URL](http://127.0.0.1:7860) 使用 `tap2` 。使用 `Ctrl+C` 关闭 `tap2`。
@@ -102,20 +102,20 @@ tapu --host 127.0.0.1 --port 8000
 - **单点预测**
 
 ```python
-from tap2 import TAP2Input, TAP2Infer
+from tap2 import TAInput, TAInfer
 
 # 创建 TAPP 推理器实例
-tapp_infer = TAP2Infer()
+ta_infer = TAInfer()
 
 # 用字典定义单条输入数据
-data = {"Prop": "DS", "Ti": 90.0, "H": 0.0, "B": 0.0, "C": 0.0, "N": 0.0, "O": 0.0, "Al": 6.0, "Si": 0.0, "Cr": 0.0,
+data = {"prop": "DS", "Ti": 90.0, "H": 0.0, "B": 0.0, "C": 0.0, "N": 0.0, "O": 0.0, "Al": 6.0, "Si": 0.0, "Cr": 0.0,
         "Fe": 0.0, "Ni": 0.0, "Cu": 0.0, "Zr": 0.0, "Nb": 0.0, "Mo": 0.0, "V": 4.0, "Sn": 0.0, "HTT": 800.0}
 
 # 创建 TAPP 单一输入实例
-data = TAP2Input(**data)
+data = TAInput(**data)
 
 # 调用 TAPP 进行推理
-result = tapp_infer(data).value
+result = ta_infer(data).value
 
 # 打印浮点数结果
 print(f"Density: {result :.3f} g/cm^3")
@@ -126,14 +126,14 @@ print(f"Density: {result :.3f} g/cm^3")
 - **批量预测**
 
 ```python
-from tap2 import TAP2BatchInput, TAP2Infer
+from tap2 import TABatchInput, TAInfer
 
-# 创建TAPP推理器实例
-tapp_infer = TAP2Infer()
+# 创建 TAPP 推理器实例
+ta_infer = TAInfer()
 
 # 用字典定义多条输入数据，其中字典的值为列表
 data = {
-  "Prop": "DS",
+  "prop": "DS",
   "Ti": [90.0, 97.0],
   "H": [0.0, 0.0],
   "B": [0.0, 0.0],
@@ -155,10 +155,10 @@ data = {
 }
 
 # 创建 TAPP 批量输入实例
-data = TAP2BatchInput(**data)
+data = TABatchInput(**data)
 
 # 调用 TAPP 进行推理
-results = tapp_infer(data).value
+results = ta_infer(data).value
 
 # 打印浮点数结果
 for result in results:
@@ -205,7 +205,7 @@ curl -X 'POST' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
-  "Prop": "DS",
+  "prop": "DS",
   "Ti": 90,
   "H": 0,
   "B": 0,
@@ -236,7 +236,7 @@ curl -X 'POST' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
-  "Prop": "DS",
+  "prop": "DS",
   "Ti": [90,97],
   "H": [0,0],
   "B": [0,0],

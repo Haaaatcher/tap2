@@ -1,64 +1,53 @@
-from __future__ import annotations
 from hashlib import sha256
 from copy import deepcopy
-from art import text2art
-from tap2.model import MoE2
+from tap2.model import MoE2, AAModel
 from pathlib import Path
 from importlib import resources
-from typing import Literal, Any, List, Annotated, Optional
+from typing import Any, List, Annotated, Optional
 from pydantic import BaseModel, Field, model_validator
 from sparsemax import Sparsemax
 from loguru import logger
 from math import isclose, ceil
-from rich import print as rprint
-from rapidfuzz import process as RFP
+from enum import Enum
 import torch
-import csv
-import ncn
 import json
 
 
-# 最大的批量大小，防止内存溢出
-_MAX_BATCH_SIZE = 10000
+# Maximum batch size to prevent memory overflow
+_MAX_BATCH_SIZE_ = 10000
 
 
-# 各性能的默认单位映射
-_DEFAULT_UNIT_MAP = {
-    "BTT": "℃",
-    "WF": "wt%",
-    "TE": "K^-1",
-    "DS": "g/cm^3",
-    "TC": "W/m·K",
-    "EC": "S/m",
-    "YM": "GPa",
-    "BM": "GPa",
-    "SM": "GPa",
-    "SE": "J/g",
-    "SHC": "J/g·K",
-    "YS": "MPa",
-    "TS": "MPa",
-    "HD": "VPN",
-    "HP": "MPa·m^(1/2)"
-}
-
-
-class TAP2Exception(Exception):
+class TAPropAbbr(Enum):
     """
-    tap2 exception class to display tap2-related errors.
+    Abbreviation for titanium alloy property
     """
-    def __init__(self, message):
-        super().__init__(message)
-        self.message = message
+    BTT = 'BTT'
+    WF = 'WF'
+    TE = 'TE'
+    DS = 'DS'
+    TC = 'TC'
+    EC = 'EC'
+    YM = 'YM'
+    BM = 'BM'
+    SM = 'SM'
+    PR = 'PR'
+    SE = 'SE'
+    SHC = 'SHC'
+    YS = 'YS'
+    TS = 'TS'
+    HD = 'HD'
+    HP = 'HP'
 
-    def __str__(self):
-        return self.message
 
-
-class TAP2Input(BaseModel):
+class TAInput(BaseModel):
     """
-    TAP2 单一输入的数据结构，包含钛合金的元素组成、热处理温度和晶粒尺寸等信息。
+    The input data structure of the TAInfer class (single)
+    contains the property abbreviation, elemental composition, heat treatment temperature and grain size.
     """
-    Prop: Literal['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP'] = Field(..., description='钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、硬度（HD）、霍尔佩奇系数（HP）', examples=['DS'])
+    prop: TAPropAbbr = Field(..., description=('钛合金性能代码：β-转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、'
+                                               '热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、'
+                                               '泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、'
+                                               '硬度（HD）、霍尔佩奇系数（HP）'), examples=['DS'])
     Ti: float = Field(default=0, description='钛（Ti）的质量分数', examples=[90], ge=0, le=100)
     H: float = Field(default=0, description='氢（H）的质量分数', examples=[0], ge=0, le=100)
     B: float = Field(default=0, description='硼（B）的质量分数', examples=[0], ge=0, le=100)
@@ -76,183 +65,234 @@ class TAP2Input(BaseModel):
     Mo: float = Field(default=0, description='钼（Mo）的质量分数', examples=[0], ge=0, le=100)
     V: float = Field(default=0, description='钒（V）的质量分数', examples=[4], ge=0, le=100)
     Sn: float = Field(default=0, description='锡（Sn）的质量分数', examples=[0], ge=0, le=100)
-    HTT: Optional[float] = Field(default=None, description='热处理温度（℃），预测如下性能必须提供热处理温度：WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP', examples=[600], gt=-273.15)
-    GS: Optional[float] = Field(default=None, description='晶粒尺寸（μm），预测如下性能必须提供晶粒尺寸：YS、TS、HD、HP', examples=[10], gt=0)
+    HTT: Optional[float] = Field(default=None, description='热处理温度（℃），除预测β-转变温度（BTT）外，均须提供热处理温度',
+                                 examples=[600], gt=-273.15)
+    GS: Optional[float] = Field(default=None, description='晶粒尺寸（μm），预测力学性能（YS、TS、HD、HP）须提供晶粒尺寸',
+                                examples=[10], gt=0)
 
-    @model_validator(mode="after")
-    def _valid_compos(self) -> Any:
+    @model_validator(mode='after')
+    def _valid_compos_(self) -> Any:
         """
-        验证元素组成之和是否为 100 wt%。
+        Verify that the sum of the elemental composition is 100 wt%.
         :return: self
         """
-        total = self.Ti + self.H + self.B + self.C + self.N + self.O + self.Al + self.Si + self.Cr + self.Fe + self.Ni + self.Cu + self.Zr + self.Nb + self.Mo + self.V + self.Sn
+        total = sum([self.Ti, self.H, self.B, self.C, self.N, self.O, self.Al, self.Si, self.Cr, self.Fe, self.Ni,
+                     self.Cu, self.Zr, self.Nb, self.Mo, self.V, self.Sn])
         if not isclose(total, 100, abs_tol=1e-6):
-            raise TAP2Exception(f"The sum of all element compositions must be 100, but got {total}.")
+            raise ValueError(f'The sum of all element compositions must be 100, but got {total}.')
         return self
 
-    @model_validator(mode="after")
-    def _valid_htt(self) -> Any:
+    @model_validator(mode='after')
+    def _valid_htt_(self) -> Any:
         """
-        验证如下性能是否提供了热处理温度：WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP。
+        Verify that heat treatment temperatures (other than BTT) are provided.
         :return: self
         """
-        if self.Prop in ["WF", "TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC", "YS", "TS", "HD", "HP"] and self.HTT is None:
-            raise TAP2Exception("HTT is required for WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP")
+        if self.prop is not TAPropAbbr.BTT and self.HTT is None:
+            raise ValueError(f'Heat treatment temperature (HTT) is required for {self.prop.value}.')
         return self
 
-    @model_validator(mode="after")
-    def _valid_gs(self) -> Any:
+    @model_validator(mode='after')
+    def _valid_gs_(self) -> Any:
         """
-        验证如下性能是否提供了晶粒尺寸：YS、TS、HD、HP。
+        Verify that the mechanical property prediction provides the grain size.
         :return: self
         """
-        if self.Prop in ("YS", "TS", "HD", "HP") and self.GS is None:
-            raise TAP2Exception("GS is required for YS、TS、HD、HP.")
+        if self.prop in (TAPropAbbr.YS, TAPropAbbr.TS, TAPropAbbr.HD, TAPropAbbr.HP) and self.GS is None:
+            raise ValueError(f'Grains size (GS) is required for {self.prop.value}.')
         return self
 
     def __str__(self) -> str:
         """
-        将 TAPPInput 实例转换为字符串表示。
-        :return: TAPPInput 实例的字符串表示，例如：{Prop=YS, Ti=90, H=0, B=0, C=0, N=0, O=0, Al=6, Si=0, Cr=0, Fe=0, Ni=0, Cu=0, Zr=0, Nb=0, Mo=0, V=4, Sn=0, HTT=800, GS=20}。
+        Converts the TAInput instance to a string representation, which complies with the JSON specification.
+        :return: The string representation of the TAInput instance
         """
-        return f"{{Prop={self.Prop}" + \
-               f", Ti={self.Ti:f}".rstrip('0').rstrip('.') + \
-               f", H={self.H:f}".rstrip('0').rstrip('.') + \
-               f", B={self.B:f}".rstrip('0').rstrip('.') + \
-               f", C={self.C:f}".rstrip('0').rstrip('.') + \
-               f", N={self.N:f}".rstrip('0').rstrip('.') + \
-               f", O={self.O:f}".rstrip('0').rstrip('.') + \
-               f", Al={self.Al:f}".rstrip('0').rstrip('.') + \
-               f", Si={self.Si:f}".rstrip('0').rstrip('.') + \
-               f", Cr={self.Cr:f}".rstrip('0').rstrip('.') + \
-               f", Fe={self.Fe:f}".rstrip('0').rstrip('.') + \
-               f", Ni={self.Ni:f}".rstrip('0').rstrip('.') + \
-               f", Cu={self.Cu:f}".rstrip('0').rstrip('.') + \
-               f", Zr={self.Zr:f}".rstrip('0').rstrip('.') + \
-               f", Nb={self.Nb:f}".rstrip('0').rstrip('.') + \
-               f", Mo={self.Mo:f}".rstrip('0').rstrip('.') + \
-               f", V={self.V:f}".rstrip('0').rstrip('.') + \
-               f", Sn={self.Sn:f}".rstrip('0').rstrip('.') + \
-               ", HTT=" + (f"{self.HTT:f}".rstrip('0').rstrip('.') if self.HTT is not None else "None") + \
-               ", GS=" + (f"{self.GS:f}".rstrip('0').rstrip('.') if self.GS is not None else "None") + "}"
+        return json.dumps({
+            'prop': self.prop.value,
+            'Ti': f'{self.Ti:f}'.rstrip('0').rstrip('.'),
+            'H': f'{self.H:f}'.rstrip('0').rstrip('.'),
+            'B': f'{self.B:f}'.rstrip('0').rstrip('.'),
+            'C': f'{self.C:f}'.rstrip('0').rstrip('.'),
+            'N': f'{self.N:f}'.rstrip('0').rstrip('.'),
+            'O': f'{self.O:f}'.rstrip('0').rstrip('.'),
+            'Al': f'{self.Al:f}'.rstrip('0').rstrip('.'),
+            'Si': f'{self.Si:f}'.rstrip('0').rstrip('.'),
+            'Cr': f'{self.Cr:f}'.rstrip('0').rstrip('.'),
+            'Fe': f'{self.Fe:f}'.rstrip('0').rstrip('.'),
+            'Ni': f'{self.Ni:f}'.rstrip('0').rstrip('.'),
+            'Cu': f'{self.Cu:f}'.rstrip('0').rstrip('.'),
+            'Zr': f'{self.Zr:f}'.rstrip('0').rstrip('.'),
+            'Nb': f'{self.Nb:f}'.rstrip('0').rstrip('.'),
+            'Mo': f'{self.Mo:f}'.rstrip('0').rstrip('.'),
+            'V': f'{self.V:f}'.rstrip('0').rstrip('.'),
+            'Sn': f'{self.Sn:f}'.rstrip('0').rstrip('.'),
+            'HTT': f"{self.HTT:f}".rstrip('0').rstrip('.') if self.HTT is not None else None,
+            'GS': f"{self.GS:f}".rstrip('0').rstrip('.') if self.GS is not None else None
+        }, ensure_ascii=False)
 
     @property
     def sha256(self) -> str:
         """
-        计算 TAPPInput 实例的 SHA256 哈希值。
-        :return: SHA256 哈希值
+        Calculate the SHA256 hash value of the TAInput instance.
+        :return: The SHA256 hash of the TAInput instance
         """
         return sha256(str(self).encode("utf-8")).hexdigest()
 
 
-class TAP2BatchInput(BaseModel):
+class TABatchInput(BaseModel):
     """
-    TAP2 批量输入的数据结构，包含钛合金的元素组成、热处理温度和晶粒尺寸等信息的列表。
+    The input data structure of the TAInfer class (batch)
+    contains the property abbreviation and lists of the elemental composition, heat treatment temperature, grain size.
     """
-    Prop: Literal["BTT", "WF", "TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC", "YS", "TS", "HD", "HP"] = Field(..., description="钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、硬度（HD）、霍尔佩奇系数（HP）", examples=["DS"])
-    Ti: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="钛（Ti）的质量分数列表", examples=[[90, 97]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    H: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="氢（H）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    B: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="硼（B）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    C: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="碳（C）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    N: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="氮（N）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    O: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="氧（O）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Al: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="铝（Al）的质量分数列表", examples=[[6, 3]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Si: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="硅（Si）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Cr: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="铬（Cr）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Fe: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="铁（Fe）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Ni: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="镍（Ni）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Cu: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="铜（Cu）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Zr: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="锆（Zr）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Nb: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="铌（Nb）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Mo: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="钼（Mo）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    V: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="钒（V）的质量分数列表", examples=[[4, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    Sn: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="锡（Sn）的质量分数列表", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    HTT: Optional[List[Annotated[float, Field(gt=-273.15)]]] = Field(default=None, description="热处理温度（℃），预测如下性能必须提供热处理温度：WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP", examples=[[600, 800]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    GS: Optional[List[Annotated[float, Field(gt=0)]]] = Field(default=None, description="晶粒尺寸（μm）列表，预测如下性能必须提供晶粒尺寸：YS、TS、HD、HP", examples=[[10, 20]], min_length=1, max_length=_MAX_BATCH_SIZE)
+    prop: TAPropAbbr = Field(..., description='钛合金性能代码：β-转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、'
+                                              '热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、'
+                                              '泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、'
+                                              '硬度（HD）、霍尔佩奇系数（HP）', examples=["DS"])
+    Ti: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="钛（Ti）的质量分数列表",
+                                                            examples=[[90, 97]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    H: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                           description="氢（H）的质量分数列表",
+                                                           examples=[[0, 0]],
+                                                           min_length=1,
+                                                           max_length=_MAX_BATCH_SIZE_)
+    B: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                           description="硼（B）的质量分数列表",
+                                                           examples=[[0, 0]],
+                                                           min_length=1,
+                                                           max_length=_MAX_BATCH_SIZE_)
+    C: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                           description="碳（C）的质量分数列表",
+                                                           examples=[[0, 0]],
+                                                           min_length=1,
+                                                           max_length=_MAX_BATCH_SIZE_)
+    N: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                           description="氮（N）的质量分数列表",
+                                                           examples=[[0, 0]],
+                                                           min_length=1,
+                                                           max_length=_MAX_BATCH_SIZE_)
+    O: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                           description="氧（O）的质量分数列表",
+                                                           examples=[[0, 0]],
+                                                           min_length=1,
+                                                           max_length=_MAX_BATCH_SIZE_)
+    Al: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="铝（Al）的质量分数列表",
+                                                            examples=[[6, 3]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Si: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="硅（Si）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Cr: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="铬（Cr）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Fe: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="铁（Fe）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Ni: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="镍（Ni）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Cu: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="铜（Cu）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Zr: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="锆（Zr）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Nb: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="铌（Nb）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    Mo: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="钼（Mo）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    V: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                           description="钒（V）的质量分数列表",
+                                                           examples=[[4, 0]],
+                                                           min_length=1,
+                                                           max_length=_MAX_BATCH_SIZE_)
+    Sn: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="锡（Sn）的质量分数列表",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
+    HTT: Optional[List[Annotated[float, Field(gt=-273.15)]]] = \
+        Field(default=None, description='热处理温度（℃），除预测β-转变温度（BTT）外，均须提供热处理温度',
+              examples=[[600, 800]], min_length=1, max_length=_MAX_BATCH_SIZE_)
+    GS: Optional[List[Annotated[float, Field(gt=0)]]] = \
+        Field(default=None, description='晶粒尺寸（μm），预测力学性能（YS、TS、HD、HP）须提供晶粒尺寸',
+              examples=[[10, 20]], min_length=1, max_length=_MAX_BATCH_SIZE_)
 
-    @model_validator(mode="after")
-    def _valid_compos(self) -> Any:
+    @model_validator(mode='after')
+    def _valid_compos_(self) -> Any:
         """
-        验证批量输入的每一项是否均满足元素组成之和为 100 wt%，实际只检查前 N 项（N 为最小列表长度）。
+        Verify that the sum of the elemental composition is 100 wt%.
         :return: self
         """
         for idx in range(len(self)):
-            total = self.Ti[idx] + self.H[idx] + self.B[idx] + self.C[idx] + self.N[idx] + self.O[idx] + self.Al[idx] + self.Si[idx] + self.Cr[idx] + self.Fe[idx] + self.Ni[idx] + self.Cu[idx] + self.Zr[idx] + self.Nb[idx] + self.Mo[idx] + self.V[idx] + self.Sn[idx]
+            total = self.Ti[idx] + self.H[idx] + self.B[idx] + self.C[idx] + self.N[idx] + self.O[idx] + self.Al[idx] + \
+                    self.Si[idx] + self.Cr[idx] + self.Fe[idx] + self.Ni[idx] + self.Cu[idx] + self.Zr[idx] + \
+                    self.Nb[idx] + self.Mo[idx] + self.V[idx] + self.Sn[idx]
             if not isclose(total, 100, abs_tol=1e-6):
-                raise TAP2Exception(f"The sum of all element compositions must be 100, but got {total} at index {idx}.")
+                raise ValueError(f"The sum of all element compositions must be 100, but got {total} at index {idx}.")
         return self
 
-    @model_validator(mode="after")
-    def _valid_htt(self) -> Any:
+    @model_validator(mode='after')
+    def _valid_htt_(self) -> Any:
         """
-        验证如下性能是否提供了热处理温度：WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP。
+        Verify that heat treatment temperatures (other than BTT) are provided.
         :return: self
         """
-        if self.Prop in ["WF", "TE", "DS", "TC", "EC", "YM", "BM", "SM", "PR", "SE", "SHC", "YS", "TS", "HD", "HP"] and self.HTT is None:
-            raise TAP2Exception("HTT is required for WF、TE、DS、TC、EC、YM、BM、SM、PR、SE、SHC、YS、TS、HD、HP")
+        if self.prop is not TAPropAbbr.BTT and self.HTT is None:
+            raise ValueError(f'Heat treatment temperature (HTT) is required for {self.prop.value}.')
         return self
 
-    @model_validator(mode="after")
-    def _valid_gs(self) -> Any:
+    @model_validator(mode='after')
+    def _valid_gs_(self) -> Any:
         """
-        验证如下性能是否提供了晶粒尺寸：YS、TS、HD、HP。
+        Verify that the mechanical property prediction provides the grain size.
         :return: self
         """
-        if self.Prop in ("YS", "TS", "HD", "HP") and self.GS is None:
-            raise TAP2Exception("GS is required for YS、TS、HD、HP.")
+        if self.prop in (TAPropAbbr.TS, TAPropAbbr.YS, TAPropAbbr.HD, TAPropAbbr.HP) and self.GS is None:
+            raise ValueError(f'Grains size (GS) is required for {self.prop.value}.')
         return self
 
     def __len__(self) -> int:
         """
-        计算 TAP2 批量输入的大小，原则为取最短列表长度。
-        :return: TAP2 批量输入的大小
+        Calculate the batch size and take the shortest list length.
+        :return: Batch size
         """
-        min_len = min(len(self.Ti), len(self.H), len(self.B), len(self.C), len(self.N), len(self.O), len(self.Al), len(self.Si), len(self.Cr), len(self.Fe), len(self.Ni), len(self.Cu), len(self.Zr), len(self.Nb), len(self.Mo), len(self.V), len(self.Sn))
+        l = min(len(self.Ti), len(self.H), len(self.B), len(self.C), len(self.N), len(self.O), len(self.Al),
+                len(self.Si), len(self.Cr), len(self.Fe), len(self.Ni), len(self.Cu), len(self.Zr), len(self.Nb),
+                len(self.Mo), len(self.V), len(self.Sn))
         if self.HTT is not None:
-            min_len = min(min_len, len(self.HTT))
+            l = min(l, len(self.HTT))
         if self.GS is not None:
-            min_len = min(min_len, len(self.GS))
-        return min_len
-
-    def __str__(self) -> str:
-        """
-        将 TAPPBatchInput 实例转换为字符串表示。
-        :return: TAPPBatchInput 实例的字符串表示。
-        """
-        input_size = len(self)
-        return f"{{Prop={self.Prop}" + \
-               f", Ti=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Ti[:input_size]])}]" + \
-               f", H=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.H[:input_size]])}]" + \
-               f", B=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.B[:input_size]])}]" + \
-               f", C=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.C[:input_size]])}]" + \
-               f", N=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.N[:input_size]])}]" + \
-               f", O=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.O[:input_size]])}]" + \
-               f", Al=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Al[:input_size]])}]" + \
-               f", Si=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Si[:input_size]])}]" + \
-               f", Cr=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Cr[:input_size]])}]" + \
-               f", Fe=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Fe[:input_size]])}]" + \
-               f", Ni=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Ni[:input_size]])}]" + \
-               f", Cu=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Cu[:input_size]])}]" + \
-               f", Zr=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Zr[:input_size]])}]" + \
-               f", Nb=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Nb[:input_size]])}]" + \
-               f", Mo=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Mo[:input_size]])}]" + \
-               f", V=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.V[:input_size]])}]" + \
-               f", Sn=[{', '.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.Sn[:input_size]])}]" + \
-               ", HTT=" + (f"[{','.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.HTT[:input_size]])}]" if self.HTT is not None else "None") + \
-               ", GS=" + (f"[{','.join([f'{_:f}'.rstrip('0').rstrip('.') for _ in self.GS[:input_size]])}]" if self.GS is not None else "None") + "}"
-
-    @property
-    def sha256(self) -> str:
-        """
-        计算 TAPPBatchInput 实例的 SHA256 哈希值。
-        :return: SHA256 哈希值
-        """
-        return sha256(str(self).encode("utf-8")).hexdigest()
+            l = min(l, len(self.GS))
+        return l
 
 
-class TAP2PhaseRatio(BaseModel):
+class TAPhaseRatio(BaseModel):
     """
-    TAP2 相比例的数据结构，包含钛合金各相的质量分数。
+    The phase ration data structure of TAInfer class (single)
+    contains the mass fraction of each phase.
     """
     ALPHA: float = Field(default=0, description="ALPHA 相的质量分数（wt%）", ge=0, le=100)
     BETA: float = Field(default=0, description="BETA 相的质量分数（wt%）", ge=0, le=100)
@@ -267,437 +307,418 @@ class TAP2PhaseRatio(BaseModel):
     C15_FCC: float = Field(default=0, description="C15_FCC 相的质量分数（wt%）", ge=0, le=100)
     MC: float = Field(default=0, description="MC 相的质量分数（wt%）", ge=0, le=100)
 
-    @model_validator(mode="after")
-    def _valid_sum(self) -> Any:
-        """
-        验证各相质量分数之和是否为 100 wt%。
-        :return: self
-        """
-        total = self.ALPHA + self.BETA + self.LIQUID + self.LAVES + self.TI3AL + self.TI2CU + self.TI5SI3 + self.TIZRSI + self.TI2NI + self.TIM_B2 + self.C15_FCC + self.MC
-        if not isclose(total, 100, abs_tol=1e-3):
-            raise TAP2Exception(f"The sum of all phase ratios must be 100, but got {total}.")
-        return self
 
-    def __str__(self) -> str:
-        """
-        将 TAPPPhaseRatio 实例转换为字符串表示。
-        :return: TAPPPhaseRatio 实例的字符串表示，例如：{ALPHA=50, BETA=50, LIQUID=0, LAVES=0, TI3AL=0, TI2CU=0,
-                 TI5SI3=0, TIZRSI=0, TI2NI=0, TIM_B2=0, C15_FCC=0, MC=0}。
-        """
-        return f'{{ALPHA={self.ALPHA:f}'.rstrip('0').rstrip('.') + \
-               f', BETA={self.BETA:f}'.rstrip('0').rstrip('.') + \
-               f', LIQUID={self.LIQUID:f}'.rstrip('0').rstrip('.') + \
-               f', LAVES={self.LAVES:f}'.rstrip('0').rstrip('.') + \
-               f', TI3AL={self.TI3AL:f}'.rstrip('0').rstrip('.') + \
-               f', TI2CU={self.TI2CU:f}'.rstrip('0').rstrip('.') + \
-               f', TI5SI3={self.TI5SI3:f}'.rstrip('0').rstrip('.') + \
-               f', TIZRSI={self.TIZRSI:f}'.rstrip('0').rstrip('.') + \
-               f', TI2NI={self.TI2NI:f}'.rstrip('0').rstrip('.') + \
-               f', TIM_B2={self.TIM_B2:f}'.rstrip('0').rstrip('.') + \
-               f', C15_FCC={self.C15_FCC:f}'.rstrip('0').rstrip('.') + \
-               f', MC={self.MC:f}'.rstrip('0').rstrip('.') + '}'
-
-
-class TAP2BatchPhaseRatio(BaseModel):
+class TABatchPhaseRatio(BaseModel):
     """
-    TAP2 批量相比例的数据结构，包含钛合金各相的质量分数列表。
+    The phase ration data structure of TAInfer class (batch)
+    contains the list of mass fraction of each phase.
     """
-    ALPHA: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="ALPHA 相的质量分数列表（wt%）", examples=[[100, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    BETA: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="BETA 相的质量分数列表（wt%）", examples=[[0, 100]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    LIQUID: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="LIQUID 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    LAVES: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="LAVES 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    TI3AL: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="TI3AL 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    TI2CU: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="TI2CU 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    TI5SI3: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="TI5SI3 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    TIZRSI: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="TIZRSI 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    TI2NI: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="TI2NI 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    TIM_B2: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="TIM_B2 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    C15_FCC: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="C15_FCC 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-    MC: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE, description="MC 相的质量分数列表（wt%）", examples=[[0, 0]], min_length=1, max_length=_MAX_BATCH_SIZE)
-
-    @model_validator(mode="after")
-    def _valid_sum(self) -> Any:
-        """
-        验证批量相比例的每一项是否均满足各相质量分数之和为 100 wt%，实际只检查前 N 项（N 为最小列表长度）。
-        :return: self
-        """
-        for idx in range(len(self)):
-            total = self.ALPHA[idx] + self.BETA[idx] + self.LIQUID[idx] + self.LAVES[idx] + self.TI3AL[idx] + self.TI2CU[idx] + self.TI5SI3[idx] + self.TIZRSI[idx] + self.TI2NI[idx] + self.TIM_B2[idx] + self.C15_FCC[idx] + self.MC[idx]
-            if not isclose(total, 100, abs_tol=1e-3):
-                raise TAP2Exception(f"The sum of all phase ratios must be 100, but got {total} at index {idx}.")
-        return self
+    ALPHA: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                               description="ALPHA 相的质量分数列表（wt%）",
+                                                               examples=[[100, 0]],
+                                                               min_length=1,
+                                                               max_length=_MAX_BATCH_SIZE_)
+    BETA: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                              description="BETA 相的质量分数列表（wt%）",
+                                                              examples=[[0, 100]],
+                                                              min_length=1,
+                                                              max_length=_MAX_BATCH_SIZE_)
+    LIQUID: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                                description="LIQUID 相的质量分数列表（wt%）",
+                                                                examples=[[0, 0]],
+                                                                min_length=1,
+                                                                max_length=_MAX_BATCH_SIZE_)
+    LAVES: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                               description="LAVES 相的质量分数列表（wt%）",
+                                                               examples=[[0, 0]],
+                                                               min_length=1,
+                                                               max_length=_MAX_BATCH_SIZE_)
+    TI3AL: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                               description="TI3AL 相的质量分数列表（wt%）",
+                                                               examples=[[0, 0]],
+                                                               min_length=1,
+                                                               max_length=_MAX_BATCH_SIZE_)
+    TI2CU: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                               description="TI2CU 相的质量分数列表（wt%）",
+                                                               examples=[[0, 0]],
+                                                               min_length=1,
+                                                               max_length=_MAX_BATCH_SIZE_)
+    TI5SI3: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                                description="TI5SI3 相的质量分数列表（wt%）",
+                                                                examples=[[0, 0]],
+                                                                min_length=1,
+                                                                max_length=_MAX_BATCH_SIZE_)
+    TIZRSI: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                                description="TIZRSI 相的质量分数列表（wt%）",
+                                                                examples=[[0, 0]],
+                                                                min_length=1,
+                                                                max_length=_MAX_BATCH_SIZE_)
+    TI2NI: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                               description="TI2NI 相的质量分数列表（wt%）",
+                                                               examples=[[0, 0]],
+                                                               min_length=1,
+                                                               max_length=_MAX_BATCH_SIZE_)
+    TIM_B2: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                                description="TIM_B2 相的质量分数列表（wt%）",
+                                                                examples=[[0, 0]],
+                                                                min_length=1,
+                                                                max_length=_MAX_BATCH_SIZE_)
+    C15_FCC: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                                 description="C15_FCC 相的质量分数列表（wt%）",
+                                                                 examples=[[0, 0]],
+                                                                 min_length=1,
+                                                                 max_length=_MAX_BATCH_SIZE_)
+    MC: List[Annotated[float, Field(ge=0, le=100)]] = Field(default=[0] * _MAX_BATCH_SIZE_,
+                                                            description="MC 相的质量分数列表（wt%）",
+                                                            examples=[[0, 0]],
+                                                            min_length=1,
+                                                            max_length=_MAX_BATCH_SIZE_)
 
     def __len__(self) -> int:
         """
-        计算 TAP2 批量相比例的大小，原则为取最短列表长度。
-        :return: TAP2 批量相比例的大小
+        Calculate the batch size and take the shortest list length.
+        :return: Batch size
         """
-        return min(len(self.ALPHA), len(self.BETA), len(self.LIQUID), len(self.LAVES), len(self.TI3AL), len(self.TI2CU), len(self.TI5SI3), len(self.TIZRSI), len(self.TI2NI), len(self.TIM_B2), len(self.C15_FCC), len(self.MC))
-
-    def __str__(self) -> str:
-        """
-        将 TAPPBatchPhaseRatio 实例转换为字符串表示。
-        :return: TAPPBatchPhaseRatio 实例的字符串表示。
-        """
-        size = len(self)
-        return f'{{ALPHA=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.ALPHA[:size]])}]' + \
-               f', BETA=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.BETA[:size]])}]' + \
-               f', LIQUID=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.LIQUID[:size]])}]' + \
-               f', LAVES=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.LAVES[:size]])}]' + \
-               f', TI3AL=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.TI3AL[:size]])}]' + \
-               f', TI2CU=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.TI2CU[:size]])}]' + \
-               f', TI5SI3=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.TI5SI3[:size]])}]' + \
-               f', TIZRSI=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.TIZRSI[:size]])}]' + \
-               f', TI2NI=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.TI2NI[:size]])}]' + \
-               f', TIM_B2=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.TIM_B2[:size]])}]' + \
-               f', C15_FCC=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.C15_FCC[:size]])}]' + \
-               f', MC=[{", ".join([f"{_:f}".rstrip("0").rstrip(".") for _ in self.MC[:size]])}]' + '}'
+        return min(len(self.ALPHA), len(self.BETA), len(self.LIQUID), len(self.LAVES), len(self.TI3AL), len(self.TI2CU),
+                   len(self.TI5SI3), len(self.TIZRSI), len(self.TI2NI), len(self.TIM_B2), len(self.C15_FCC), len(self.MC))
 
 
-class TAP2Output(BaseModel):
+class TAOutput(BaseModel):
     """
-    TAP2 单一输出的数据结构，包含钛合金的性能代码、预测值及其单位。
+    The output data structure of the TAInfer class (single)
+    contains the property abbreviation, predicted value and unit.
     """
-    Prop: Literal['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP'] = Field(..., description='钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、硬度（HD）、霍尔佩奇系数（HP）', examples=["DS", "WF"])
-    value: float | TAP2PhaseRatio = Field(..., description='TAP2 模型预测的钛合金性能值，除相比例（WF）外，全部为浮点数类型，相比例为 TAPPPhaseRatio 类型，包含各相的质量分数。', examples=[5, TAP2PhaseRatio(ALPHA=50, BETA=50)])
+    prop: TAPropAbbr = Field(..., description=('钛合金性能代码：β-转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、'
+                                               '热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、'
+                                               '泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、'
+                                               '硬度（HD）、霍尔佩奇系数（HP）'),
+                             examples=["DS", "WF"])
+    value: float | TAPhaseRatio = Field(..., description=('钛合金性能值，除相比例外，全部为浮点数类型，相比例为 TAPhaseRatio 类型，'
+                                                          '包含各相的质量分数'),
+                                        examples=[5, TAPhaseRatio(ALPHA=50, BETA=50)])
     unit: Optional[str] = Field(default=None, description='钛合金性能单位', examples=['g/cm^3', 'wt%'])
 
-    @model_validator(mode="after")
-    def _valid_value_type(self) -> Any:
-        """
-        验证 value 的类型是否与 Prop 匹配：除相比例（WF）外，全部为浮点数类型，相比例为 TAPPPhaseRatio 类型。
-        :return: self
-        """
-        if self.Prop == "WF":
-            if not isinstance(self.value, TAP2PhaseRatio):
-                raise TAP2Exception("For WF, value must be of type TAPPPhaseRatio.")
-        else:
-            if not isinstance(self.value, float):
-                raise TAP2Exception(f"For {self.Prop}, value must be of type float.")
-        return self
-
-    @model_validator(mode='after')
-    def _default_unit(self) -> Any:
-        """
-        设置默认单位：BTT（℃）、WF（wt%）、TE（K^-1）、DS（g/cm^3）、TC（W/m·K）、EC（S/m）、YM（GPa）、BM（GPa）、SM（GPa）、SE（J/g）、SHC（J/g·K）、YS（MPa）、TS（MPa）、HD（VPN）、HP（MPa·m^(1/2)）。
-        :return: self
-        """
-        if self.Prop in _DEFAULT_UNIT_MAP and self.unit is None:
-            self.unit = _DEFAULT_UNIT_MAP[self.Prop]
-        return self
-
     def __str__(self) -> str:
         """
-        将 TAPPOutput 实例转换为字符串表示。
-        :return: TAPPOutput 实例的字符串表示，例如：{Prop=DS, value=4.43, unit=g/cm^3}
+        Converts the TAOutput instance to a string representation that meets the JSON specification.
+        :return: The string representation of the TAOutput instance
         """
-        if self.Prop == "WF":
-            value_str = str(self.value)
+        if self.prop is TAPropAbbr.WF:
+            value = {
+                'ALPHA': f'{self.value.ALPHA:f}'.rstrip('0').rstrip('.'),
+                'BETA': f'{self.value.BETA:f}'.rstrip('0').rstrip('.'),
+                'LIQUID': f'{self.value.LIQUID:f}'.rstrip('0').rstrip('.'),
+                'LAVES': f'{self.value.LAVES:f}'.rstrip('0').rstrip('.'),
+                'TI3AL': f'{self.value.TI3AL:f}'.rstrip('0').rstrip('.'),
+                'TI2CU': f'{self.value.TI2CU:f}'.rstrip('0').rstrip('.'),
+                'TI5SI3': f'{self.value.TI5SI3:f}'.rstrip('0').rstrip('.'),
+                'TIZRSI': f'{self.value.TIZRSI:f}'.rstrip('0').rstrip('.'),
+                'TI2NI': f'{self.value.TI2NI:f}'.rstrip('0').rstrip('.'),
+                'TIM_B2': f'{self.value.TIM_B2:f}'.rstrip('0').rstrip('.'),
+                'C15_FCC': f'{self.value.C15_FCC:f}'.rstrip('0').rstrip('.'),
+                'MC': f'{self.value.MC:f}'.rstrip('0').rstrip('.')
+            }
         else:
-            value_str = f"{self.value:f}".rstrip('0').rstrip('.')
-        output_str = f"{{Prop={self.Prop}, value={value_str}, unit=" + (self.unit if self.unit is not None else "None") + "}"
-        return output_str
+            value = f'{self.value:f}'.rstrip('0').rstrip('.')
+        return json.dumps({
+            'prop': self.prop.value,
+            'value': value,
+            'unit': self.unit
+        }, ensure_ascii=False)
 
 
-class TAP2BatchOutput(BaseModel):
+class TABatchOutput(BaseModel):
     """
-    TAP2 批量输出的数据结构，包含钛合金的性能代码、预测值列表及其单位。
+    The output data structure of the TAInfer class (batch)
+    contains the property abbreviation and lists of predicted value, unit.
     """
-    Prop: Literal['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP'] = Field(..., description='钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、硬度（HD）、霍尔佩奇系数（HP）', examples=['DS', 'WF'])
-    value: List[float] | TAP2BatchPhaseRatio = Field(..., description='TAP2 模型预测的钛合金性能值列表，除相比例（WF）外，全部为浮点数列表类型，相比例为 TAPPBatchPhaseRatio 类型，包含各相的质量分数列表。', examples=[[5, 6], TAP2BatchPhaseRatio(ALPHA=[100, 0], BETA=[0, 100])])
+    prop: TAPropAbbr = Field(..., description='钛合金性能代码：β转变温度（BTT）、相比例（WF）、热膨胀系数（TE）、密度（DS）、'
+                                              '热导率（TC）、电导率（EC）、杨氏模量（YM）、体积模量（BM）、剪切模量（SM）、'
+                                              '泊松比（PR）、比焓（SE）、比热容（SHC）、屈服强度（YS）、抗拉强度（TS）、'
+                                              '硬度（HD）、霍尔佩奇系数（HP）', examples=['DS', 'WF'])
+    value: List[float] | TABatchPhaseRatio = Field(..., description='钛合金性能值，除相比例外，全部为浮点数列表类型，'
+                                                                    '相比例为 TABatchPhaseRatio 类型。',
+                                                   examples=[[5, 6], TABatchPhaseRatio(ALPHA=[100, 0], BETA=[0, 100])])
     unit: Optional[str] = Field(default=None, description='钛合金性能单位', examples=['g/cm^3', 'wt%'])
-
-    @model_validator(mode="after")
-    def _valid_value_type(self) -> Any:
-        """
-        验证 value 的类型是否与 Prop 匹配：除相比例（WF）外，全部为浮点数列表类型，相比例为 TAPPBatchPhaseRatio 类型。
-        :return: self
-        """
-        if self.Prop == "WF":
-            if not isinstance(self.value, TAP2BatchPhaseRatio):
-                raise TAP2Exception("For WF, value must be of type TAPPBatchPhaseRatio.")
-        else:
-            if not isinstance(self.value, List):
-                raise TAP2Exception(f"For {self.Prop}, value must be of type List[float].")
-            if not all(isinstance(v, float) for v in self.value):
-                raise TAP2Exception(f"For {self.Prop}, all items in value must be of type float.")
-        return self
-
-    @model_validator(mode='after')
-    def _default_unit(self) -> Any:
-        """
-        设置默认单位：BTT（℃）、WF（wt%）、TE（K^-1）、DS（g/cm^3）、TC（W/m·K）、EC（S/m）、YM（GPa）、BM（GPa）、SM（GPa）、SE（J/g）、SHC（J/g·K）、YS（MPa）、TS（MPa）、HD（VPN）、HP（MPa·m^(1/2)）。
-        :return: self
-        """
-        if self.Prop in _DEFAULT_UNIT_MAP and self.unit is None:
-            self.unit = _DEFAULT_UNIT_MAP[self.Prop]
-        return self
-
-    def __str__(self) -> str:
-        """
-        将 TAPPBatchOutput 实例转换为字符串表示。
-        :return: TAPPBatchOutput 实例的字符串表示
-        """
-        if self.Prop == "WF":
-            value_str = str(self.value)
-        else:
-            value_str = f"[{', '.join(f'{_:f}'.rstrip('0').rstrip('.') for _ in self.value)}]"
-        output_str = f"{{Prop={self.Prop}, value={value_str}, unit=" + (self.unit if self.unit is not None else "None") + "}"
-        return output_str
 
     def __len__(self) -> int:
         """
-        计算 TAP2 批量输出的大小，原则为取最短列表长度。
-        :return: 批量输出的大小
+        Calculate the batch size and take the shortest list length.
+        :return: Batch size
         """
         return len(self.value)
 
 
-class TAP2Infer:
-
-    _prop_abbrs = ['BTT', 'WF', 'TE', 'DS', 'TC', 'EC', 'YM', 'BM', 'SM', 'PR', 'SE', 'SHC', 'YS', 'TS', 'HD', 'HP']
-
-    _norm_params = {
-        "BTT": {"Min": 202.56698, "Max": 1318.89996},
-        "TE": {"Min": 4.848329916e-06, "Max": 2.283828168e-05},
-        "DS": {"Min": 3.672575187, "Max": 10.34887892},
-        "TC": {"Min": -87.38449318, "Max": 116.9406027},
-        "EC": {"Min": 257.542498, "Max": 6101953.5},
-        "YM": {"Min": -98.60315674, "Max": 273.60016},
-        "BM": {"Min": -91.34943727, "Max": 232.2667855},
-        "SM": {"Min": -37.34688091, "Max": 104.9342765},
-        "PR": {"Min": 0.2569257344, "Max": 0.5},
-        "SE": {"Min": -2140.62959, "Max": 1075.43465},
-        "SHC": {"Min": 0.0016, "Max": 0.96764},
-        "YS": {"Min": 2.297351749, "Max": 1896.478209},
-        "TS": {"Min": 2.576930196, "Max": 2104.915562},
-        "HD": {"Min": 0.8708966542, "Max": 705.7024083},
-        "HP": {"Min": 0.007003215217, "Max": 1.712580475}
+class TAInfer:
+    _norm_params_ = {
+        TAPropAbbr.BTT: {"Min": 202.56698, "Max": 1318.89996},
+        TAPropAbbr.TE: {"Min": 4.848329916e-06, "Max": 2.283828168e-05},
+        TAPropAbbr.DS: {"Min": 3.672575187, "Max": 10.34887892},
+        TAPropAbbr.TC: {"Min": -87.38449318, "Max": 116.9406027},
+        TAPropAbbr.EC: {"Min": 257.542498, "Max": 6101953.5},
+        TAPropAbbr.YM: {"Min": -98.60315674, "Max": 273.60016},
+        TAPropAbbr.BM: {"Min": -91.34943727, "Max": 232.2667855},
+        TAPropAbbr.SM: {"Min": -37.34688091, "Max": 104.9342765},
+        TAPropAbbr.PR: {"Min": 0.2569257344, "Max": 0.5},
+        TAPropAbbr.SE: {"Min": -2140.62959, "Max": 1075.43465},
+        TAPropAbbr.SHC: {"Min": 0.0016, "Max": 0.96764},
+        TAPropAbbr.YS: {"Min": 2.297351749, "Max": 1896.478209},
+        TAPropAbbr.TS: {"Min": 2.576930196, "Max": 2104.915562},
+        TAPropAbbr.HD: {"Min": 0.8708966542, "Max": 705.7024083},
+        TAPropAbbr.HP: {"Min": 0.007003215217, "Max": 1.712580475}
     }
 
-    _sparsemax = Sparsemax(dim=-1)
+    _unit_map_ = {
+        TAPropAbbr.BTT: '℃',
+        TAPropAbbr.WF: 'wt%',
+        TAPropAbbr.TE: 'K^-1',
+        TAPropAbbr.DS: 'g/cm^3',
+        TAPropAbbr.TC: 'W/(m·K)',
+        TAPropAbbr.EC: 'S/m',
+        TAPropAbbr.YM: 'GPa',
+        TAPropAbbr.BM: 'GPa',
+        TAPropAbbr.SM: 'GPa',
+        TAPropAbbr.PR: None,
+        TAPropAbbr.SE: 'J/g',
+        TAPropAbbr.SHC: 'J/g·K',
+        TAPropAbbr.YS: 'MPa',
+        TAPropAbbr.TS: 'MPa',
+        TAPropAbbr.HD: 'VPN',
+        TAPropAbbr.HP: 'MPa·m^(1/2)'
+    }
 
-    _task_flag_len = 8
+    _sparsemax_ = Sparsemax(dim=-1)
 
-    def __init__(self, device: torch.device | None = None, batch_size: int = 64, silence: bool = False, skip_correction: bool = False):
+    def __init__(self, device: torch.device | None = None, batch_size: int = 64, silence: bool = False, skip: bool = False):
         """
-        使用 TAP2 模型进行推理的工具类，能够进行钛合金性能预测。
-        :param device: 指定 Torch 设备，若为 None 优先选择 CUDA 设备。
-        :param batch_size: 进行批量推理时的批大小，批大小不超过 10,000。
-        :param silence: 是否开启静默模式，静默模式不打印运行日志。
-        :param skip_correction: 是否跳过经验公式修正。
+        A tool class that use TAPP models for inference and can predict the properties of titanium alloys.
+        :param device: Specify the Torch device
+        :param batch_size: The batch size for batch inference, which is not more than 10,000
+        :param silence: Whether to turn on silent mode, silent mode does not print run logs
+        :param skip: Whether to skip the empirical formula correction
         """
-        self._sil = silence
-        self._skp = skip_correction
-        self._dev = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
-        if not 0 < batch_size < _MAX_BATCH_SIZE:
-            raise TAP2Exception('Batch size must be between 1 and 10,000.')
-        self._bs = batch_size
-        print(text2art('TAP2'), end='')
-        print(f'Device: {self._dev}')
-        print(f'Batch Size: {self._bs}')
-        rprint('Silence: [green]YES[/green]' if self._sil else 'Silence: [red]NO[/red]')
-        rprint('Correction: [red]NO[/red]' if self._skp else 'Correction: [green]YES[/green]')
-        # 加载模型权重
-        self._ms = {}
-        for prop_abbr in self._prop_abbrs:
-            prop_num = 12 if prop_abbr == "WF" else 1
-            proc_num = 0 if prop_abbr == "BTT" else 1
-            model_path = Path(str(resources.files("tap2.weight").joinpath(f"{prop_abbr}.pth")))
-            model = MoE2(12, proc_num, prop_num, 512, 0.2).to(self._dev)
-            model.load_state_dict(torch.load(model_path, map_location=self._dev))
+        self.silence = silence
+        self.skip = skip
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
+        if not 1 < batch_size < _MAX_BATCH_SIZE_:
+            raise ValueError('Batch size must be between 2 and 10,000.')
+        self.batch_size = batch_size
+        # Load model weights
+        self._ms_ = {}
+        for prop_abbr in TAPropAbbr:
+            prop_num = 12 if prop_abbr is TAPropAbbr.WF else 1
+            proc_num = 0 if prop_abbr is TAPropAbbr.BTT else 1
+            model_path = Path(str(resources.files('tap2.weight').joinpath(f'{prop_abbr.value}.pth')))
+            model = MoE2(12, proc_num, prop_num, 512, 0.2).to(self.device)
+            model.load_state_dict(torch.load(model_path, map_location=self.device))
             model.eval()
-            self._ms[prop_abbr] = model
-        # 加载修正参数
-        if not self._skp:
-            weight_path = Path(str(resources.files("tap2.weight").joinpath("corr_weights.pth")))
-            self._cws = torch.load(weight_path, map_location=self._dev)
+            self._ms_[prop_abbr] = model
+        # Load the correction parameters
+        if not self.skip:
+            weight_path = Path(str(resources.files('tap2.weight').joinpath('corr_weights.pth')))
+            self._cws_ = torch.load(weight_path, map_location=self.device)
 
-    def _short_task_flag(self, task_flag: str) -> str:
+    def _infer_(self, ta_input: TAInput) -> float | List[float]:
         """
-        获取简短的任务标识，长度不超过 8。
-        :param task_flag: 任务标识
-        :return: 简短的任务标识
-        """
-        if len(task_flag) > self._task_flag_len:
-            return task_flag[:self._task_flag_len] + '*'
-        else:
-            return task_flag
-
-    def _infer(self, tapp_input: TAP2Input) -> float | List[float]:
-        """
-        调用 TAP2 模型进行单点推理，获取预测性能。
-        :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（单一输入）。
-        :return: 性能值（单一输出）。
+        Invoke the TAPP model for single inference to obtain predictive property value.
+        :param ta_input: Includes abbreviation of property to be predicted, elemental composition,
+                           heat treatment temperature and grain size (single input)
+        :return: Property value predicted by the TAPP model (single output)
         """
         with torch.inference_mode():
-            model = self._ms[tapp_input.Prop]
-            if tapp_input.Prop == 'BTT':
+            model = self._ms_[ta_input.prop]
+            if ta_input.prop is TAPropAbbr.BTT:
                 input_T = torch.tensor(
-                    data=[[tapp_input.Ti, tapp_input.Al, tapp_input.Cr, tapp_input.Cu, tapp_input.Fe, tapp_input.Mo, tapp_input.Ni, tapp_input.Nb, tapp_input.Si, tapp_input.Sn, tapp_input.V, tapp_input.Zr]],
+                    data=[[ta_input.Ti, ta_input.Al, ta_input.Cr, ta_input.Cu, ta_input.Fe, ta_input.Mo,
+                           ta_input.Ni, ta_input.Nb, ta_input.Si, ta_input.Sn, ta_input.V, ta_input.Zr]],
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (1, 12)
             else:
                 input_T = torch.tensor(
-                    data=[[tapp_input.Ti, tapp_input.Al, tapp_input.Cr, tapp_input.Cu, tapp_input.Fe, tapp_input.Mo, tapp_input.Ni, tapp_input.Nb, tapp_input.Si, tapp_input.Sn, tapp_input.V, tapp_input.Zr, tapp_input.HTT]],
+                    data=[[ta_input.Ti, ta_input.Al, ta_input.Cr, ta_input.Cu, ta_input.Fe, ta_input.Mo,
+                           ta_input.Ni, ta_input.Nb, ta_input.Si, ta_input.Sn, ta_input.V, ta_input.Zr,
+                           ta_input.HTT]],
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (1, 13)
             output_T = model(input_T) # Shape: (1, PropNum)
-            if tapp_input.Prop == 'WF':
-                output_T = self._sparsemax(output_T) # Shape: (1, 12)
+            if ta_input.prop is TAPropAbbr.WF:
+                output_T = self._sparsemax_(output_T) # Shape: (1, 12)
                 output_T = output_T * 100 # Shape: (1, 12)
                 output = output_T.tolist()[0] # Shape: (12,)
             else:
-                min_val = self._norm_params[tapp_input.Prop]["Min"]
-                max_val = self._norm_params[tapp_input.Prop]["Max"]
+                min_val = self._norm_params_[ta_input.prop]['Min']
+                max_val = self._norm_params_[ta_input.prop]['Max']
                 output_T = output_T * (max_val - min_val) + min_val # Shape: (1, 1)
                 output = output_T.item()
         return output
 
-    def _batch_infer(self, tapp_input: TAP2BatchInput) -> List[float] | List[List[float]]:
+    def _batch_infer_(self, ta_input: TABatchInput) -> List[float] | List[List[float]]:
         """
-        调用 TAP2 模型进行批量推理，获取预测性能。
-        :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（批量输入）。
-        :return: 性能值（批量输出）。
+        Invoke the TAPP model for batch inference to obtain predictive property values.
+        :param ta_input: Includes abbreviation of property to be predicted, lists of elemental composition,
+                           heat treatment temperature, grain size (batch input)
+        :return: Property values predicted by the TAPP model (batch output)
         """
-        input_size = len(tapp_input)
-        batch_num = ceil(input_size / self._bs)
-        if tapp_input.Prop == 'WF':
-            outputs = [[]] * 12
+        input_size = len(ta_input)
+        batch_num = ceil(input_size / self.batch_size)
+        if ta_input.prop is TAPropAbbr.WF:
+            outputs = [[] for _ in range(12)]
         else:
             outputs = []
         with torch.inference_mode():
-            model = self._ms[tapp_input.Prop]
+            model = self._ms_[ta_input.prop]
             for batch_id in range(batch_num):
-                begin_idx = batch_id * self._bs
-                end_idx = min(begin_idx + self._bs, input_size)
-                if tapp_input.Prop == 'BTT':
+                begin_idx = batch_id * self.batch_size
+                end_idx = min(begin_idx + self.batch_size, input_size)
+                if ta_input.prop is TAPropAbbr.BTT:
                     inputs_T = torch.tensor(
-                        data=[tapp_input.Ti[begin_idx: end_idx], tapp_input.Al[begin_idx: end_idx], tapp_input.Cr[begin_idx: end_idx], tapp_input.Cu[begin_idx: end_idx], tapp_input.Fe[begin_idx: end_idx], tapp_input.Mo[begin_idx: end_idx], tapp_input.Ni[begin_idx: end_idx], tapp_input.Nb[begin_idx: end_idx], tapp_input.Si[begin_idx: end_idx], tapp_input.Sn[begin_idx: end_idx], tapp_input.V[begin_idx: end_idx], tapp_input.Zr[begin_idx: end_idx]],
+                        data=[ta_input.Ti[begin_idx: end_idx], ta_input.Al[begin_idx: end_idx],
+                              ta_input.Cr[begin_idx: end_idx], ta_input.Cu[begin_idx: end_idx],
+                              ta_input.Fe[begin_idx: end_idx], ta_input.Mo[begin_idx: end_idx],
+                              ta_input.Ni[begin_idx: end_idx], ta_input.Nb[begin_idx: end_idx],
+                              ta_input.Si[begin_idx: end_idx], ta_input.Sn[begin_idx: end_idx],
+                              ta_input.V[begin_idx: end_idx], ta_input.Zr[begin_idx: end_idx]],
                         dtype=torch.float32,
-                        device=self._dev,
+                        device=self.device,
                         requires_grad=False
                     )  # Shape: (12, BatchSize)
                     inputs_T = inputs_T.T  # Shape: (BatchSize, 12)
                 else:
                     inputs_T = torch.tensor(
-                        data=[tapp_input.Ti[begin_idx: end_idx], tapp_input.Al[begin_idx: end_idx], tapp_input.Cr[begin_idx: end_idx], tapp_input.Cu[begin_idx: end_idx], tapp_input.Fe[begin_idx: end_idx], tapp_input.Mo[begin_idx: end_idx], tapp_input.Ni[begin_idx: end_idx], tapp_input.Nb[begin_idx: end_idx], tapp_input.Si[begin_idx: end_idx], tapp_input.Sn[begin_idx: end_idx], tapp_input.V[begin_idx: end_idx], tapp_input.Zr[begin_idx: end_idx], tapp_input.HTT[begin_idx: end_idx]],
+                        data=[ta_input.Ti[begin_idx: end_idx], ta_input.Al[begin_idx: end_idx],
+                              ta_input.Cr[begin_idx: end_idx], ta_input.Cu[begin_idx: end_idx],
+                              ta_input.Fe[begin_idx: end_idx], ta_input.Mo[begin_idx: end_idx],
+                              ta_input.Ni[begin_idx: end_idx], ta_input.Nb[begin_idx: end_idx],
+                              ta_input.Si[begin_idx: end_idx], ta_input.Sn[begin_idx: end_idx],
+                              ta_input.V[begin_idx: end_idx], ta_input.Zr[begin_idx: end_idx],
+                              ta_input.HTT[begin_idx: end_idx]],
                         dtype=torch.float32,
-                        device=self._dev,
+                        device=self.device,
                         requires_grad=False
                     ) # Shape: (13, BatchSize)
                     inputs_T = inputs_T.T # Shape: (BatchSize, 13)
                 outputs_T = model(inputs_T) # Shape: (BatchSize, PropNum)
-                if tapp_input.Prop == "WF":
-                    outputs_T = self._sparsemax(outputs_T) # Shape: (BatchSize, 12)
+                if ta_input.prop is TAPropAbbr.WF:
+                    outputs_T = self._sparsemax_(outputs_T) # Shape: (BatchSize, 12)
                     outputs_T = outputs_T.T  # Shape: (12, BatchSize)
                     outputs_T = outputs_T * 100  # Shape: (12, BatchSize)
                     batch_outputs = outputs_T.tolist()  # Shape: (12, BatchSize)
-                    for x, y in zip(outputs, batch_outputs):
-                        x.extend(y)
+                    for i, batch_output in enumerate(batch_outputs):
+                        outputs[i].extend(batch_output)
                 else:
-                    min_val = self._norm_params[tapp_input.Prop]["Min"]
-                    max_val = self._norm_params[tapp_input.Prop]["Max"]
+                    min_val = self._norm_params_[ta_input.prop]['Min']
+                    max_val = self._norm_params_[ta_input.prop]['Max']
                     outputs_T = outputs_T.squeeze(-1)  # Shape: (BatchSize,)
                     outputs_T = outputs_T * (max_val - min_val) + min_val # Shape: (BatchSize,)
                     batch_outputs = outputs_T.tolist()  # Shape: (BatchSize,)
                     outputs.extend(batch_outputs)
+
         return outputs
 
-    def _corr(self, tapp_input: TAP2Input, orig_output: float | List[float]) -> float | List[float]:
+    def _corr_(self, ta_input: TAInput, orig_output: float | List[float]) -> float | List[float]:
         """
-        利用经验公式对 TAP2 模型的预测结果进行修正。
-        :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（单一输入）。
-        :param orig_output: 原始性能值（单一输出）。
-        :return: 修正性能值（单一输出）。
+        The prediction result of the TAPP model are modified using empirical formulas.
+        :param ta_input: Includes abbreviation of property to be predicted, elemental composition,
+                           heat treatment temperature and grain size (single input)
+        :param orig_output: Original property value predicted by the TAPP model (single output)
+        :return: Corrected property value (single output)
         """
         correct = deepcopy(orig_output)
-        if tapp_input.Prop in ["YS", "TS"]:
+        if ta_input.prop in (TAPropAbbr.YS, TAPropAbbr.TS):
             with torch.inference_mode():
                 micro_elem_T = torch.tensor(
-                    data=[tapp_input.N, tapp_input.O, tapp_input.C, tapp_input.H, tapp_input.B],
+                    data=[ta_input.N, ta_input.O, ta_input.C, ta_input.H, ta_input.B],
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (5,)
-                increment = torch.sum(self._cws['TS_YS'] * micro_elem_T)
-                if tapp_input.Prop == "TS":
+                increment = torch.sum(self._cws_['TS_YS'] * micro_elem_T)
+                if ta_input.prop is TAPropAbbr.TS:
                     increment *= 1.1
                 increment = increment.item()
-            grain_size = tapp_input.GS * 1e-6
-            hall_petch = self._infer(tapp_input.model_copy(update={"Prop": "HP", "GS": 10}, deep=True))
+            grain_size = ta_input.GS * 1e-6
+            hall_petch = self._infer_(ta_input.model_copy(update={'prop': TAPropAbbr.HP, 'GS': 10}, deep=True))
             increment += hall_petch * (pow(grain_size, -0.5) - pow(1e-5, -0.5))
             correct += increment
-        elif tapp_input.Prop in ["DS", "TC", "EC", "YM", "BM", "SM", "PR"]:
+        elif ta_input.prop in (TAPropAbbr.DS, TAPropAbbr.TC, TAPropAbbr.EC, TAPropAbbr.YM,
+                               TAPropAbbr.BM, TAPropAbbr.SM, TAPropAbbr.PR):
             with torch.inference_mode():
                 micro_elem_T = torch.tensor(
-                    data=[[tapp_input.C, tapp_input.N, tapp_input.O, tapp_input.B, tapp_input.H]],
+                    data=[[ta_input.C, ta_input.N, ta_input.O, ta_input.B, ta_input.H]],
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (1, 5)
                 main_elem_T = torch.tensor(
-                    data=[[tapp_input.Al], [tapp_input.Cr], [tapp_input.Cu], [tapp_input.Fe], [tapp_input.Mo], [tapp_input.Nb], [tapp_input.Ni], [tapp_input.Si], [tapp_input.Sn]],
+                    data=[[ta_input.Al], [ta_input.Cr], [ta_input.Cu], [ta_input.Fe], [ta_input.Mo],
+                          [ta_input.Nb], [ta_input.Ni], [ta_input.Si], [ta_input.Sn]],
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (9, 1)
-                increment = (micro_elem_T @ self._cws[tapp_input.Prop] @ main_elem_T)
+                increment = (micro_elem_T @ self._cws_[ta_input.prop.value] @ main_elem_T)
                 increment = increment.item()
             correct += increment
-        elif tapp_input.Prop == "TE":
+        elif ta_input.prop is TAPropAbbr.TE:
             with torch.inference_mode():
                 micro_elem_T = torch.tensor(
-                    data=[[1, 1, 1, 1, 1], [tapp_input.N, tapp_input.O, tapp_input.C, tapp_input.H, tapp_input.B], [tapp_input.N ** 2, tapp_input.O ** 2, tapp_input.C ** 2, tapp_input.H ** 2, tapp_input.B ** 2], [tapp_input.N ** 3, tapp_input.O ** 3, tapp_input.C ** 3, tapp_input.H ** 3, tapp_input.B ** 3]],
+                    data=[[1, 1, 1, 1, 1],
+                          [ta_input.N, ta_input.O, ta_input.C, ta_input.H, ta_input.B],
+                          [ta_input.N ** 2, ta_input.O ** 2, ta_input.C ** 2, ta_input.H ** 2, ta_input.B ** 2],
+                          [ta_input.N ** 3, ta_input.O ** 3, ta_input.C ** 3, ta_input.H ** 3, ta_input.B ** 3]],
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (4, 5)
-                increment = torch.sum(micro_elem_T * self._cws['TE'])
+                increment = torch.sum(micro_elem_T * self._cws_['TE'])
                 increment = increment.item()
             correct += increment
         return correct
 
-    def _batch_corr(self, tapp_input: TAP2BatchInput, orig_output: List[float] | List[List[float]]) -> List[float] | List[List[float]]:
+    def _batch_corr_(self, ta_input: TABatchInput, orig_output: List[float] | List[List[float]]) -> List[float] | List[List[float]]:
         """
-        利用经验公式对 TAP2 模型的预测结果进行修正。
-        :param tapp_input: 输入数据，包括性能代号、元素组成、热处理温度和晶粒尺寸（批量输入）。
-        :param orig_output: 原始性能值（批量输出）。
-        :return: 修正性能值（批量输出）。
+        The prediction results of the TAPP model are modified using empirical formulas.
+        :param ta_input: Includes abbreviation of property to be predicted, lists of elemental composition,
+                           heat treatment temperature and grain size (batch input)
+        :param orig_output: Original property values predicted by the TAPP model (batch output)
+        :return: Corrected property values (batch output)
         """
-        input_size = len(tapp_input)
-        batch_num = ceil(input_size / self._bs)
+        input_size = len(ta_input)
+        batch_num = ceil(input_size / self.batch_size)
         corrects = deepcopy(orig_output)
-        if tapp_input.Prop in ["YS", "TS"]:
+        if ta_input.prop in (TAPropAbbr.YS, TAPropAbbr.TS):
             increments = []
             with torch.inference_mode():
                 hall_petch_T = torch.tensor(
-                    data=self._batch_infer(tapp_input.model_copy(update={"Prop": "HP", "GS": [10] * input_size})),
+                    data=self._batch_infer_(ta_input.model_copy(update={"prop": TAPropAbbr.HP,
+                                                                          "GS": [10] * input_size})),
                     dtype=torch.float32,
-                    device=self._dev,
+                    device=self.device,
                     requires_grad=False
                 ) # Shape: (InputSize,)
                 for batch_id in range(batch_num):
-                    begin_idx = batch_id * self._bs
-                    end_idx = min(begin_idx + self._bs, input_size)
+                    begin_idx = batch_id * self.batch_size
+                    end_idx = min(begin_idx + self.batch_size, input_size)
                     micro_elem_T = torch.tensor(
-                        data=[tapp_input.N[begin_idx: end_idx], tapp_input.O[begin_idx: end_idx], tapp_input.C[begin_idx: end_idx], tapp_input.H[begin_idx: end_idx], tapp_input.B[begin_idx: end_idx]],
+                        data=[ta_input.N[begin_idx: end_idx], ta_input.O[begin_idx: end_idx],
+                              ta_input.C[begin_idx: end_idx], ta_input.H[begin_idx: end_idx],
+                              ta_input.B[begin_idx: end_idx]],
                         dtype=torch.float32,
-                        device=self._dev,
+                        device=self.device,
                         requires_grad=False
                     ) # Shape: (5, BatchSize)
                     micro_elem_T = micro_elem_T.T # Shape: (BatchSize, 5)
-                    increments_T = torch.sum(self._cws['TS_YS'] * micro_elem_T, dim=1) # Shape: (BatchSize,)
-                    if tapp_input.Prop == "TS":
+                    increments_T = torch.sum(self._cws_['TS_YS'] * micro_elem_T, dim=1) # Shape: (BatchSize,)
+                    if ta_input.prop is TAPropAbbr.TS:
                         increments_T *= 1.1
                     grain_size_T = torch.tensor(
-                        data=tapp_input.GS[begin_idx: end_idx],
+                        data=ta_input.GS[begin_idx: end_idx],
                         dtype=torch.float32,
-                        device=self._dev,
+                        device=self.device,
                         requires_grad=False
                     ) # Shape: (BatchSize,)
                     grain_size_T *= 1e-6
@@ -706,181 +727,294 @@ class TAP2Infer:
                     increments.extend(batch_increments)
             for idx, increment in enumerate(increments):
                 corrects[idx] += increment
-        elif tapp_input.Prop in ["DS", "TC", "EC", "YM", "BM", "SM", "PR"]:
+        elif ta_input.prop in (TAPropAbbr.DS, TAPropAbbr.TC, TAPropAbbr.EC, TAPropAbbr.YM,
+                               TAPropAbbr.BM, TAPropAbbr.SM, TAPropAbbr.PR):
             increments = []
             with torch.inference_mode():
                 for batch_id in range(batch_num):
-                    begin_idx = batch_id * self._bs
-                    end_idx = min(begin_idx + self._bs, input_size)
+                    begin_idx = batch_id * self.batch_size
+                    end_idx = min(begin_idx + self.batch_size, input_size)
                     micro_elem_T = torch.tensor(
-                        data=[tapp_input.C[begin_idx: end_idx], tapp_input.N[begin_idx: end_idx], tapp_input.O[begin_idx: end_idx], tapp_input.B[begin_idx: end_idx], tapp_input.H[begin_idx: end_idx]],
+                        data=[ta_input.C[begin_idx: end_idx], ta_input.N[begin_idx: end_idx],
+                              ta_input.O[begin_idx: end_idx], ta_input.B[begin_idx: end_idx],
+                              ta_input.H[begin_idx: end_idx]],
                         dtype=torch.float32,
-                        device=self._dev,
+                        device=self.device,
                         requires_grad=False
                     ) # Shape: (5, BatchSize)
                     micro_elem_T = micro_elem_T.T.unsqueeze(1) # Shape: (BatchSize, 1, 5)
                     main_elem_T = torch.tensor(
-                        data=[tapp_input.Al[begin_idx: end_idx], tapp_input.Cr[begin_idx: end_idx], tapp_input.Cu[begin_idx: end_idx], tapp_input.Fe[begin_idx: end_idx], tapp_input.Mo[begin_idx: end_idx], tapp_input.Nb[begin_idx: end_idx], tapp_input.Ni[begin_idx: end_idx], tapp_input.Si[begin_idx: end_idx], tapp_input.Sn[begin_idx: end_idx]],
+                        data=[ta_input.Al[begin_idx: end_idx], ta_input.Cr[begin_idx: end_idx],
+                              ta_input.Cu[begin_idx: end_idx], ta_input.Fe[begin_idx: end_idx],
+                              ta_input.Mo[begin_idx: end_idx], ta_input.Nb[begin_idx: end_idx],
+                              ta_input.Ni[begin_idx: end_idx], ta_input.Si[begin_idx: end_idx],
+                              ta_input.Sn[begin_idx: end_idx]],
                         dtype=torch.float32,
-                        device=self._dev,
+                        device=self.device,
                         requires_grad=False
                     ) # Shape: (9, BatchSize)
                     main_elem_T = main_elem_T.T.unsqueeze(-1) # Shape: (BatchSize, 9, 1)
-                    increments_T = micro_elem_T @ self._cws[tapp_input.Prop] @ main_elem_T  # Shape: (BatchSize, 1, 1)
+                    increments_T = micro_elem_T @ self._cws_[ta_input.prop.value] @ main_elem_T  # Shape: (BatchSize, 1, 1)
                     increments_T = increments_T.squeeze(-1).squeeze(-1)  # Shape: (BatchSize,)
                     batch_increments = increments_T.tolist()
                     increments.extend(batch_increments)
             for idx, increment in enumerate(increments):
                 corrects[idx] += increment
-        elif tapp_input.Prop == "TE":
+        elif ta_input.prop is TAPropAbbr.TE:
             increments = []
             with torch.inference_mode():
                 for batch_id in range(batch_num):
-                    begin_idx = batch_id * self._bs
-                    end_idx = min(begin_idx + self._bs, input_size)
+                    begin_idx = batch_id * self.batch_size
+                    end_idx = min(begin_idx + self.batch_size, input_size)
                     micro_elem_T = torch.tensor(
-                        data=[tapp_input.N[begin_idx: end_idx], tapp_input.O[begin_idx: end_idx], tapp_input.C[begin_idx: end_idx], tapp_input.H[begin_idx: end_idx], tapp_input.B[begin_idx: end_idx]],
+                        data=[ta_input.N[begin_idx: end_idx], ta_input.O[begin_idx: end_idx],
+                              ta_input.C[begin_idx: end_idx], ta_input.H[begin_idx: end_idx],
+                              ta_input.B[begin_idx: end_idx]],
                         dtype=torch.float32,
-                        device=self._dev
+                        device=self.device
                     ) # Shape: (5, BatchSize)
                     micro_elem_T = micro_elem_T.T  # Shape: (BatchSize, 5)
-                    micro_elem_T = torch.stack([torch.ones_like(micro_elem_T), micro_elem_T, micro_elem_T ** 2, micro_elem_T ** 3], dim=1) # Shape: (BatchSize, 4, 5)
-                    increments_T = torch.sum(micro_elem_T * self._cws['TE'], dim=(1, 2)) # Shape: (BatchSize,)
+                    micro_elem_T = torch.stack([torch.ones_like(micro_elem_T), micro_elem_T,
+                                                micro_elem_T ** 2, micro_elem_T ** 3], dim=1) # Shape: (BatchSize, 4, 5)
+                    increments_T = torch.sum(micro_elem_T * self._cws_['TE'], dim=(1, 2)) # Shape: (BatchSize,)
                     batch_increments = increments_T.tolist()
                     increments.extend(batch_increments)
             for idx, increment in enumerate(increments):
                 corrects[idx] += increment
         return corrects
 
-    def __call__(self, tapp_input: TAP2Input | TAP2BatchInput) -> TAP2Output | TAP2BatchOutput:
+    def __call__(self, ta_input: TAInput | TABatchInput) -> TAOutput | TABatchOutput:
         """
-        调用 TAP2 模型进行推理，预测钛合金的性能，支持批量处理。
-        :param tapp_input: 包括待预测性能名称、钛合金的元素组成、热处理温度和晶粒尺寸（单一输入或批量输入）
-        :return: TAP2 预测的性能值（单一输出或批量输出）
+        Invoke the TAPP model for inference, predict the properties of titanium alloys, and support batch processing.
+        :param ta_input: Includes abbreviation of property to be predicted, elemental composition,
+                           heat treatment temperature and grain size (single input or batch input)
+        :return: Property values predicted by the TAPP model (single output or batch output)
         """
-        task_flag = self._short_task_flag(tapp_input.sha256)
-        if isinstance(tapp_input, TAP2Input):
-            logger.info(f'[{task_flag}] TAP2 INFERRING: INPUT = {tapp_input}')
-            infer_func = self._infer
-            corr_func = self._corr
-            output_type = TAP2Output
-            phase_ratio_type = TAP2PhaseRatio
+        if isinstance(ta_input, TAInput):
+            logger.info(f'Input: {ta_input}')
+            infer_func = self._infer_
+            corr_func = self._corr_
+            output_type = TAOutput
+            phase_ratio_type = TAPhaseRatio
         else:
-            logger.info(f'[{task_flag}] TAP2 BATCH INFERRING: PROP = {tapp_input.Prop}, SIZE = {len(tapp_input)} its')
-            infer_func = self._batch_infer
-            corr_func = self._batch_corr
-            output_type = TAP2BatchOutput
-            phase_ratio_type = TAP2BatchPhaseRatio
-        output_value = infer_func(tapp_input)
-        if not self._skp:
-            output_value = corr_func(tapp_input, output_value)
-        if tapp_input.Prop == 'WF':
-            tapp_output = output_type(Prop='WF', value=phase_ratio_type(
-                ALPHA=output_value[0],
-                BETA=output_value[1],
-                LAVES=output_value[2],
-                TI3AL=output_value[3],
-                TI2CU=output_value[4],
-                TI5SI3=output_value[5],
-                TIZRSI=output_value[6],
-                TI2NI=output_value[7],
-                TIM_B2=output_value[8],
-                LIQUID=output_value[9],
-                C15_FCC=output_value[10],
-                MC=output_value[11]
-            ))
+            batch_info = json.dumps({'prop': ta_input.prop.value, 'size': len(ta_input)}, ensure_ascii=False)
+            logger.info(f'Input: {batch_info}]')
+            infer_func = self._batch_infer_
+            corr_func = self._batch_corr_
+            output_type = TABatchOutput
+            phase_ratio_type = TABatchPhaseRatio
+        value = infer_func(ta_input)
+        if not self.skip:
+            value = corr_func(ta_input, value)
+        if ta_input.prop is TAPropAbbr.WF:
+            ta_output = output_type(
+                prop=ta_input.prop,
+                value=phase_ratio_type(
+                    ALPHA=value[0],
+                    BETA=value[1],
+                    LAVES=value[2],
+                    TI3AL=value[3],
+                    TI2CU=value[4],
+                    TI5SI3=value[5],
+                    TIZRSI=value[6],
+                    TI2NI=value[7],
+                    TIM_B2=value[8],
+                    LIQUID=value[9],
+                    C15_FCC=value[10],
+                    MC=value[11]
+                ),
+                unit=self._unit_map_[ta_input.prop]
+            )
         else:
-            tapp_output = output_type(Prop=tapp_input.Prop, value=output_value)
-        if isinstance(tapp_output, TAP2Output):
-            logger.info(f'[{task_flag}] TAP2 INFERRED: OUTPUT = {tapp_output}')
+            ta_output = output_type(prop=ta_input.prop, value=value, unit=self._unit_map_[ta_input.prop])
+        if isinstance(ta_output, TAOutput):
+            logger.info(f'Output: {ta_output}')
         else:
-            logger.info(f'[{task_flag}] TAP2 BATCH INFERRED: PROP = {tapp_output.Prop}, SIZE = {len(tapp_output)} its')
-        return tapp_output
+            batch_info = json.dumps({'prop': ta_input.prop.value, 'size': len(ta_output)}, ensure_ascii=False)
+            logger.info(f'Output: {batch_info}')
+        return ta_output
 
 
-class TAP2Database:
+class AAPropAbbr(Enum):
     """
-    TAP2 database management class that supports loading data from CSV files and
-    selecting properties based on composition and process.
+    Abbreviation for aluminum alloy property
     """
-    _SCORE_CUTOFF_ = 95
-    _MAX_DB_SIZE_ = 100000
+    TE = 'TE'
+    TC = 'TC'
 
-    def __init__(self):
-        """
-        Initialize the TAP2Database.
-        """
-        self.data: list[dict] = []
-        self.ncn_index: dict[str, list] = {}
 
-    def select(self, composition: dict, process: str) -> dict | None:
-        """
-        Select properties from the database based on composition and process.
-        If it hits, it returns a dictionary result, and if it misses, it returns None.
-        :param composition: Element composition as a dictionary.
-        :param process: Processing method as a string.
-        :return: Dictionary of properties if hit, None if miss.
-        """
-        key = ncn.name(**composition)
-        if key in self.ncn_index:
-            cand_process_texts = [self.data[_]['process'] for _ in self.ncn_index[key]]
-            extract_result = RFP.extractOne(process, cand_process_texts, score_cutoff=90)
-            if extract_result:
-                match_data = self.data[self.ncn_index[key][extract_result[2]]]
-                return match_data['properties']
-            else:
-                return None
-        else:
-            return None
+class AAInput(BaseModel):
+    """
+    The input data structure of the AAInfer class (single)
+    contains the property abbreviation, elemental composition and heat treatment temperature.
+    """
+    prop: AAPropAbbr = Field(..., description='铝合金性能代码：热膨胀系数（TE）、热导率（TC）', examples=['TE'])
+    Al: float = Field(default=0, description='铝（Al）的质量分数', examples=[88], ge=0, le=100)
+    Li: float = Field(default=0, description='锂（Li）的质量分数', examples=[0], ge=0, le=100)
+    Mg: float = Field(default=0, description='镁（Mg）的质量分数', examples=[0], ge=0, le=100)
+    Si: float = Field(default=0, description='硅（Si）的质量分数', examples=[12], ge=0, le=100)
+    Ca: float = Field(default=0, description='钙（Ca）的质量分数', examples=[0], ge=0, le=100)
+    Sc: float = Field(default=0, description='钪（Sc）的质量分数', examples=[0], ge=0, le=100)
+    Ti: float = Field(default=0, description='钛（Ti）的质量分数', examples=[0], ge=0, le=100)
+    V: float = Field(default=0, description='钒（V）的质量分数', examples=[0], ge=0, le=100)
+    Cr: float = Field(default=0, description='铬（Cr）的质量分数', examples=[0], ge=0, le=100)
+    Mn: float = Field(default=0, description='锰（Mn）的质量分数', examples=[0], ge=0, le=100)
+    Fe: float = Field(default=0, description='铁（Fe）的质量分数', examples=[0], ge=0, le=100)
+    Co: float = Field(default=0, description='钴（Co）的质量分数', examples=[0], ge=0, le=100)
+    Ni: float = Field(default=0, description='镍（Ni）的质量分数', examples=[0], ge=0, le=100)
+    Cu: float = Field(default=0, description='铜（Cu）的质量分数', examples=[0], ge=0, le=100)
+    Zn: float = Field(default=0, description='锌（Zn）的质量分数', examples=[0], ge=0, le=100)
+    Zr: float = Field(default=0, description='镐（Zr）的质量分数', examples=[0], ge=0, le=100)
+    Sn: float = Field(default=0, description='锡（Sn）的质量分数', examples=[0], ge=0, le=100)
+    La: float = Field(default=0, description='镧（La）的质量分数', examples=[0], ge=0, le=100)
+    HTT: float = Field(..., description='热处理温度（℃）', examples=[500], gt=-273.15)
 
-    def load_csv(self, csv_path: Path) -> int:
+    @model_validator(mode="after")
+    def _valid_compos_(self) -> Any:
         """
-        Load data from a CSV file.
-        The total amount of data does not exceed _MAX_DB_SIZE_.
-        Returns the number of successfully loaded data pieces.
-        :param csv_path: Path to the CSV file.
-        :return: Number of successfully loaded data pieces.
+        Verify that the sum of the elemental composition of the aluminum alloy is 100 wt%.
+        :return: self
         """
-        count = len(self.data)
-        with open(csv_path, 'r', encoding='utf-8', newline='') as csv_file:
-            csv_reader = csv.DictReader(csv_file, fieldnames=['composition', 'process', 'properties'], restkey='_trash_')
-            for row in csv_reader:
-                if len(self.data) < self._MAX_DB_SIZE_:
-                    row.pop('_trash_', None)
-                    row['composition'] = ncn.parse(row['composition'], balance=True)
-                    key = ncn.name(**row['composition'])
-                    row['properties'] = json.loads(row['properties'])
-                    self.data.append(row)
-                    if key in self.ncn_index:
-                        self.ncn_index[key].append(len(self.data) - 1)
-                    else:
-                        self.ncn_index[key] = [len(self.data) - 1]
-                else:
-                    break
-        return len(self.data) - count
+        total = sum([self.Al, self.Li, self.Mg, self.Si, self.Ca, self.Sc, self.Ti, self.V, self.Cr, self.Mn, self.Fe,
+                     self.Co, self.Ni, self.Cu, self.Zn, self.Zr, self.Sn, self.La])
+        if not isclose(total, 100, abs_tol=1e-6):
+            raise ValueError(f'The sum of all element compositions must be 100, but got {total}.')
+        return self
 
-    def append(self, composition: dict, process: str, properties: dict) -> bool:
+    def __str__(self) -> str:
         """
-        Append a new data entry to the database.
-        The total amount of data does not exceed _MAX_DB_SIZE_.
-        Returns True if the data is successfully appended, False otherwise.
-        :param composition: Element composition as a dictionary.
-        :param process: Processing method as a string.
-        :param properties: Properties as a dictionary.
-        :return: True if successfully appended, False otherwise.
+        Converts an AAInput instance to a string representation that meets the JSON specification.
+        :return: The string representation of AAInput instance
         """
-        if len(self.data) < self._MAX_DB_SIZE_:
-            key = ncn.name(**composition)
-            new_entry = {
-                'composition': deepcopy(composition),
-                'process': process,
-                'properties': deepcopy(properties)
-            }
-            self.data.append(new_entry)
-            if key in self.ncn_index:
-                self.ncn_index[key].append(len(self.data) - 1)
-            else:
-                self.ncn_index[key] = [len(self.data) - 1]
-            return True
-        else:
-            return False
+        return json.dumps({
+            'prop': self.prop.value,
+            'Al': f'{self.Al:f}'.rstrip('0').rstrip('.'),
+            'Li': f'{self.Li:f}'.rstrip('0').rstrip('.'),
+            'Mg': f'{self.Mg:f}'.rstrip('0').rstrip('.'),
+            'Si': f'{self.Si:f}'.rstrip('0').rstrip('.'),
+            'Ca': f'{self.Ca:f}'.rstrip('0').rstrip('.'),
+            'Sc': f'{self.Sc:f}'.rstrip('0').rstrip('.'),
+            'Ti': f'{self.Ti:f}'.rstrip('0').rstrip('.'),
+            'V': f'{self.V:f}'.rstrip('0').rstrip('.'),
+            'Cr': f'{self.Cr:f}'.rstrip('0').rstrip('.'),
+            'Mn': f'{self.Mn:f}'.rstrip('0').rstrip('.'),
+            'Fe': f'{self.Fe:f}'.rstrip('0').rstrip('.'),
+            'Co': f'{self.Co:f}'.rstrip('0').rstrip('.'),
+            'Ni': f'{self.Ni:f}'.rstrip('0').rstrip('.'),
+            'Cu': f'{self.Cu:f}'.rstrip('0').rstrip('.'),
+            'Zn': f'{self.Zn:f}'.rstrip('0').rstrip('.'),
+            'Zr': f'{self.Zr:f}'.rstrip('0').rstrip('.'),
+            'Sn': f'{self.Sn:f}'.rstrip('0').rstrip('.'),
+            'La': f'{self.La:f}'.rstrip('0').rstrip('.'),
+            'HTT': f'{self.HTT:f}'.rstrip('0').rstrip('.')
+        }, ensure_ascii=False)
+
+    @property
+    def sha256(self) -> str:
+        """
+        Calculate the SHA256 hash value of the AAInput instance.
+        :return: SHA256 hash value
+        """
+        return sha256(str(self).encode('utf-8')).hexdigest()
+
+
+class AAOutput(BaseModel):
+    """
+    The output data structure of the AAInfer class (single)
+    contains the property abbreviation, predicted value and unit.
+    """
+    prop: AAPropAbbr = Field(..., description='铝合金性能代码：热膨胀系数（TE）、热导率（TC）', examples=['TE'])
+    value: float = Field(..., description='铝合金性能值，均为浮点数类型', examples=[22])
+    unit: str = Field(..., description='铝合金性能单位', examples=['10^-6/K'])
+
+    def __str__(self) -> str:
+        """
+        Converts AAOutput instances to string representation that meets the JSON specification.
+        :return: The string representation of AAOutput instance
+        """
+        return json.dumps({
+            'prop': self.prop.value,
+            'value': f'{self.value:f}'.rstrip('0').rstrip('.'),
+            'unit': self.unit
+        }, ensure_ascii=False)
+
+
+class AAInfer:
+    _unit_map_ = {
+        AAPropAbbr.TE: "K^-1",
+        AAPropAbbr.TC: "W/m·K"
+    }
+
+    def __init__(self, device: torch.device | None = None, silence: bool = False):
+        """
+        A tool class that use AAPP models for inference and can predict the properties of aluminum alloys.
+        :param device: Specify the Torch device
+        :param silence: Whether to turn on silent mode, silent mode does not print run logs
+        """
+        # Initialize the parameters
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.silence = silence
+        # Load the model weights
+        self.models = {}
+        for prop_abbr in AAPropAbbr:
+            weight_path = Path(str(resources.files("tap2.weight").joinpath(f"AA_{prop_abbr.value}.pth")))
+            model = AAModel(input_dim=19, hidden_dim=450, output_dim=1, dropout_rate=0.2).to(self.device)
+            model.load_state_dict(torch.load(weight_path, map_location=self.device))
+            model.eval()
+            self.models[prop_abbr] = model
+        # Initialize the normalization parameters
+        self.mins = torch.tensor(data=[72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 400,
+                                       28.843647, 18.968151],
+                                  dtype=torch.float32,
+                                  device=self.device,
+                                  requires_grad=False)
+        self.maxs = torch.tensor(data=[99.8, 5, 12, 13, 2, 5, 2, 8, 7, 3, 3, 5, 10, 10, 12, 3, 1, 15, 700,
+                                       236.329194, 34.945403],
+                                 dtype=torch.float32,
+                                 device=self.device,
+                                 requires_grad=False)
+
+    def _infer_(self, aa_input: AAInput) -> float:
+        """
+        Invoke the AAPP model for single inference to obtain predictive property value.
+        :param aa_input: Includes abbreviation of property to be predicted, elemental composition,
+                         heat treatment temperature and grain size (single input)
+        :return: Property value predicted by the AAPP model (single output)
+        """
+        model = self.models[aa_input.prop]
+        with torch.inference_mode():
+            input_T = torch.tensor(
+                data=[[aa_input.Al, aa_input.Li, aa_input.Mg, aa_input.Si, aa_input.Ca, aa_input.Sc, aa_input.Ti,
+                       aa_input.V, aa_input.Cr, aa_input.Mn, aa_input.Fe, aa_input.Co, aa_input.Ni, aa_input.Cu,
+                       aa_input.Zn, aa_input.Zr, aa_input.Sn, aa_input.La, aa_input.HTT]],
+                dtype=torch.float32,
+                device=self.device,
+                requires_grad=False
+            )  # Shape: (1, 19)
+            # 对输入进行归一化
+            input_T = (input_T - self.mins[:19]) / (self.maxs[:19] - self.mins[:19])  # Shape: (1, 19)
+            output_T = model(input_T)  # Shape: (1, 1)
+            # 对输出进行反归一化
+            match aa_input.prop:
+                case AAPropAbbr.TC:
+                    output_T = output_T * (self.maxs[19] - self.mins[19]) + self.mins[19]  # Shape: (1, 1)
+                case AAPropAbbr.TE:
+                    output_T = output_T * (self.maxs[20] - self.mins[20]) + self.mins[20]  # Shape: (1, 1)
+                case _:
+                    raise ValueError(f'Unsupported property: {aa_input.prop}')
+            output_value = output_T.item()
+        return output_value
+
+    def __call__(self, aa_input: AAInput) -> AAOutput:
+        if not self.silence:
+            logger.info(f'Input: {aa_input}')
+        value = self._infer_(aa_input)
+        aa_output = AAOutput(
+            prop=aa_input.prop,
+            value=value,
+            unit=self._unit_map_[aa_input.prop]
+        )
+        if not self.silence:
+            logger.info(f'Output: {aa_output}')
+        return aa_output

@@ -1,9 +1,9 @@
+**/__pycache__/
 /tap2.egg-info/
 /tap2/resource/
 /tap2/weight/
-/thermal_deformation/resource
-/heat_treatment/resource
+/advanced_module/resource
 /dist/
 /.idea/
 /.gradio/
-/logs/
+/.ruff_cache/

@@ -14,36 +14,38 @@ authors = [
     {name = "Qi-yang Lv"},
     {name = "Lu-yue Qiu"},
     {name = "Rui-hao He"},
-    {name = "Bo-han Zhang"}
+    {name = "Bo-han Zhang"},
+    {name = "Cheng-wei Li"}
 ]
 urls = {Homepage = "https://github.com/Haaaatcher"}
-description = "Use TAP2 for property prediction of titanium alloy."
+description = "Use tap2 for property prediction of titanium alloy and aluminum alloy."
 requires-python = ">=3.10"
-keywords = ["titanium alloy", "property prediction"]
+keywords = ["titanium alloy", "aluminum alloy", "property prediction"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "torch>=2.8.0",
-    "gradio>=6.1.0",
-    "fastapi>=0.125.0",
-    "uvicorn[standard]>=0.35.0",
+    "torch>=2.10.0",
+    "gradio>=6.9.0",
+    "fastapi>=0.135.1",
+    "uvicorn[standard]>=0.41.0",
     "click>=8.2.1",
     "art>=6.5",
     "openpyxl>=3.1.5",
     "numpy>=2.2.6",
-    "pydantic>=2.12.4",
+    "pydantic>=2.12.5",
     "sparsemax>=0.1.9",
     "loguru>=0.7.3",
     "charset_normalizer>=3.4.3",
     "joblib>=1.5.3",
     "scipy>=1.15.3",
-    "catboost>=1.2.8",
-    "scikit-learn>=1.7.2",
-    "rich>=14.2.0",
-    "rapidfuzz>=3.14.3",
-    "ncn>=0.0.4"
+    "catboost>=1.2.10",
+    "rich>=14.3.3",
+    "ncn>=0.0.5",
+    "lightgbm>=4.6.0",
+    "scikit-learn==1.7.0",
+    "xgboost==3.0.2"
 ]
 
 [project.scripts]
@@ -58,10 +60,7 @@ tap2 = [
     "weight/*",
     "resource/*"
 ]
-thermal_deformation = [
-    "resource/*"
-]
-heat_treatment = [
+advanced_module = [
     "resource/*"
 ]
 
