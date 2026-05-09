@@ -27,23 +27,18 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.10.0",
-    "gradio>=6.9.0",
+    "gradio>=6.14.0",
     "litserve>=0.2.17",
-    "click>=8.2.1",
+    "click>=8.3.3",
     "art>=6.5",
     "numpy>=2.2.6",
-    "pydantic>=2.12.5",
+    "pandas>=3.0.2",
+    "pydantic>=2.13.4",
     "sparsemax>=0.1.9",
     "loguru>=0.7.3",
     "charset_normalizer>=3.4.3",
     "joblib>=1.5.3",
-    "scipy>=1.15.3",
-    "catboost>=1.2.10",
-    "rich>=14.3.3",
-    "ncn>=0.0.5",
-    "lightgbm>=4.6.0",
-    "scikit-learn==1.7.0",
-    "xgboost==3.0.2"
+    "ncn>=0.0.5"
 ]
 
 [project.scripts]
