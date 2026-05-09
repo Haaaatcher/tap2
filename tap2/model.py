@@ -95,3 +95,52 @@ class AAModel(nn.Module):
         x = self.dropout(out + identity)
         x = self.fc5(x)
         return x
+
+class ElemExpert(nn.Module):
+    def __init__(self, input_size: int, output_size: int, hidden_size: int, dropout_rate: float):
+        super(ElemExpert, self).__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+        self.hidden_size = hidden_size
+        self.dropout_rate = dropout_rate
+        self.layers = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.LeakyReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.LeakyReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_size, output_size)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class TAP2Model(nn.Module):
+    def __init__(self, expert_num, process_num, hidden_size, dropout_rate):
+        super(TAP2Model, self).__init__()
+        self.expert_num = expert_num
+        self.process_num = process_num
+        self.hidden_size = hidden_size
+        self.dropout_rate = dropout_rate
+        self.experts = nn.ModuleList(
+            [ElemExpert(1 + process_num, hidden_size, hidden_size, dropout_rate) for _ in range(expert_num)]
+        )
+        self.score = nn.Parameter(torch.zeros(hidden_size, expert_num)) # Shape: (hidden_size, expert_num)
+        self.decoder = ElemExpert(hidden_size, 1, hidden_size, dropout_rate)
+
+    def forward(self, inputs):
+        score = torch.softmax(self.score, dim=-1) # Shape: (hidden_size, expert_num)
+        score = score.unsqueeze(0) # Shape: (1, hidden_size, expert_num)
+        expert_outputs = [
+            expert(inputs[:, [i] + list(range(-1, -self.process_num - 1, -1))]) # Shape: (batch_size, hidden_size)
+            for i, expert in enumerate(self.experts)
+        ]
+        expert_outputs = torch.stack(expert_outputs, dim=-1)  # Shape: (batch_size, hidden_size, expert_num)
+        mixture = expert_outputs * score # Shape: (batch_size, hidden_size, expert_num)
+        mixture = mixture.sum(dim=-1) # Shape: (batch_size, hidden_size)
+        outputs = self.decoder(mixture)
+        return outputs

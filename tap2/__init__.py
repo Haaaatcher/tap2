@@ -1,28 +1,42 @@
 import sys
-from .model import MoE2, AAModel
-from .core import TAInfer, TAInput, TAOutput, TABatchInput, TABatchOutput, AAInfer, AAInput, AAOutput
+import matplotlib.font_manager as fm
+import matplotlib.pyplot as plt
+from .server import *
 from loguru import logger
-from pathlib import Path
 
 
 
-__version__ = "0.1.0"
+__version__ = '0.1.1'
 
-__author__ = "Hang Luo"
+__author__ = 'Hang Luo'
 
-__email__ = "haaaatcher@gmail.com"
+__email__ = 'haaaatcher@gmail.com'
 
 __all__ = [
-    "MoE2",
-    "AAModel",
-    "TAInfer",
-    "TAInput",
-    "TAOutput",
-    "TABatchInput",
-    "TABatchOutput",
-    "AAInput",
-    "AAOutput",
-    "AAInfer"
+    'TAPhysBaseModel',
+    'TAMechBaseModel',
+    'TAWFBaseModel',
+    'TADSLitAPI',
+    'TATCLitAPI',
+    'TAECLitAPI',
+    'TAYMLitAPI',
+    'TABMLitAPI',
+    'TASMLitAPI',
+    'TAPRLitAPI',
+    'TASELitAPI',
+    'TASHCLitAPI',
+    'TATELitAPI',
+    'TABTTLitAPI',
+    'TAYSLitAPI',
+    'TATSLitAPI',
+    'TAHDLitAPI',
+    'TAHPLitAPI',
+    'TAWFLitAPI',
+    'AAPhysBaseModel',
+    'AAMechBaseModel',
+    'AATCLitAPI',
+    'AATELitAPI',
+    'AAYSLitAPI',
 ]
 
 _log_format_ = "<green>[{time:YYYY-MM-DD HH:mm:ss}]</green> " \
@@ -43,3 +57,9 @@ logger.add(
     compression="zip",
     encoding="utf-8"
 )
+
+fm.fontManager.addfont(str(resources.files('tap2.resource').joinpath('SimHei.ttf')))
+
+plt.rcParams['font.sans-serif'] = ['SimHei']
+
+plt.rcParams['axes.unicode_minus'] = False
