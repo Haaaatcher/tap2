@@ -51,7 +51,6 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 tap2 = [
-    "weight/*",
     "resource/*",
     "checkpoints/*"
 ]

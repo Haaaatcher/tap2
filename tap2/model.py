@@ -96,6 +96,7 @@ class AAModel(nn.Module):
         x = self.fc5(x)
         return x
 
+
 class ElemExpert(nn.Module):
     def __init__(self, input_size: int, output_size: int, hidden_size: int, dropout_rate: float):
         super(ElemExpert, self).__init__()
