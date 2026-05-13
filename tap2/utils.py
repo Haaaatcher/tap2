@@ -664,17 +664,30 @@ def _beta_get_TA_prop(Ti: float | None, Al: float | None, V: float | None, Cr: f
             prop_values[prop_idx] = float(_BETA_TA_DB[input_hash]['val'])
         else:
             prop_value = None
-            match prop_name:
-                case 'TE': prop_value = _gen_rsbl_val(5, 12, input_hash)
-                case 'TC': prop_value = _gen_rsbl_val(5, 25, input_hash)
-                case 'YS': prop_value = _gen_rsbl_val(150, 1500, input_hash)
-                case 'TS': prop_value = prop_values[2] * 1.1
-                case 'alpha1_ratio': prop_value = _gen_rsbl_val(30, 85, input_hash)
-                case 'alpha2_ratio': prop_value = 0
-                case 'beta_ratio': prop_value = 100 - prop_values[4]
-                case 'alpha1_size': prop_value = _gen_rsbl_val(1, 25, input_hash)
-                case 'alpha2_size': prop_value = 0
-                case 'beta_size': prop_value = _gen_rsbl_val(0.5, 6, input_hash)
+            if all([isclose(Ti, 90.0), isclose(Al, 6.0), isclose(V, 4.0)]):
+                match prop_name:
+                    case 'TE': prop_value = _gen_rsbl_val(8.6, 9.5, input_hash)
+                    case 'TC': prop_value = _gen_rsbl_val(6.7, 7.0, input_hash)
+                    case 'YS': prop_value = _gen_rsbl_val(825, 950, input_hash)
+                    case 'TS': prop_value = prop_values[2] * _gen_rsbl_val(1.085, 1.211, input_hash)
+                    case 'alpha1_ratio': prop_value = _gen_rsbl_val(30, 85, input_hash)
+                    case 'alpha2_ratio': prop_value = 0
+                    case 'beta_ratio': prop_value = 100 - prop_values[4]
+                    case 'alpha1_size': prop_value = _gen_rsbl_val(1, 25, input_hash)
+                    case 'alpha2_size': prop_value = 0
+                    case 'beta_size': prop_value = _gen_rsbl_val(0.5, 6, input_hash)
+            else:
+                match prop_name:
+                    case 'TE': prop_value = _gen_rsbl_val(5, 12, input_hash)
+                    case 'TC': prop_value = _gen_rsbl_val(5, 25, input_hash)
+                    case 'YS': prop_value = _gen_rsbl_val(150, 1500, input_hash)
+                    case 'TS': prop_value = prop_values[2] * 1.1
+                    case 'alpha1_ratio': prop_value = _gen_rsbl_val(30, 85, input_hash)
+                    case 'alpha2_ratio': prop_value = 0
+                    case 'beta_ratio': prop_value = 100 - prop_values[4]
+                    case 'alpha1_size': prop_value = _gen_rsbl_val(1, 25, input_hash)
+                    case 'alpha2_size': prop_value = 0
+                    case 'beta_size': prop_value = _gen_rsbl_val(0.5, 6, input_hash)
             prop_values[prop_idx] = prop_value
     sleep(random.uniform(0.3, 0.9))
     end_time = time.perf_counter()
